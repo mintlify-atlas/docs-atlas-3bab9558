@@ -1,0 +1,225 @@
+---
+title: "LangGraph Server Overview"
+description: "Introduction to DeerFlow's LangGraph Server API for agent interactions"
+---
+
+## What is LangGraph Server?
+
+DeerFlow uses [LangGraph](https://langchain-ai.github.io/langgraph/) as its core agent runtime. The LangGraph Server provides HTTP/SSE endpoints for creating threads, sending messages, and streaming agent responses.
+
+<Info>
+  **Default Port**: LangGraph Server runs on port `2024` in development.
+  
+  When using `make dev` from the project root, all API requests are proxied through Nginx on port `2026` with the `/api/langgraph` prefix.
+</Info>
+
+## Base URL
+
+The LangGraph API is accessible at:
+
+- **Production/Docker**: `http://localhost:2026/api/langgraph`
+- **Direct access (dev)**: `http://localhost:2024`
+
+## Architecture
+
+DeerFlow's LangGraph Server is configured via `backend/langgraph.json`:
+
+```json
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "dependencies": ["."],
+  "env": ".env",
+  "graphs": {
+    "lead_agent": "src.agents:make_lead_agent"
+  }
+}
+```
+
+The `lead_agent` graph factory (`make_lead_agent`) creates the main agent with:
+
+- Dynamic model selection based on runtime configuration
+- Middleware chain for thread isolation, memory, uploads, and more
+- Tools from sandbox, built-ins, MCP servers, and community integrations
+- System prompt with skills, memory context, and date injection
+
+## Using the LangGraph SDK
+
+The official [LangGraph SDK](https://langchain-ai.github.io/langgraph/cloud/reference/sdk/python_sdk_ref/) provides a Python client for interacting with LangGraph Server.
+
+### Installation
+
+```bash
+pip install langgraph-sdk
+```
+
+### Basic Usage
+
+```python
+from langgraph_sdk import get_client
+
+# Connect to LangGraph Server
+client = get_client(url="http://localhost:2024")
+
+# Create a new thread
+thread = await client.threads.create()
+print(f"Thread ID: {thread['thread_id']}")
+
+# Send a message and get response
+response = await client.runs.create(
+    thread_id=thread["thread_id"],
+    assistant_id="lead_agent",
+    input={"messages": [{"role": "user", "content": "Hello!"}]}
+)
+```
+
+<Tip>
+  Use `assistant_id="lead_agent"` when creating runs. This references the graph defined in `langgraph.json`.
+</Tip>
+
+## Runtime Configuration
+
+You can customize agent behavior by passing `config.configurable` parameters:
+
+```python
+response = await client.runs.create(
+    thread_id=thread["thread_id"],
+    assistant_id="lead_agent",
+    input={"messages": [{"role": "user", "content": "Analyze this code"}]},
+    config={
+        "configurable": {
+            "thinking_enabled": True,
+            "model_name": "gpt-4",
+            "is_plan_mode": True,
+            "subagent_enabled": True,
+            "max_concurrent_subagents": 3
+        }
+    }
+)
+```
+
+### Available Configuration Options
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `thinking_enabled` | `bool` | `True` | Enable extended thinking mode for supported models |
+| `reasoning_effort` | `str` | `None` | Reasoning effort level (e.g., "low", "medium", "high") |
+| `model_name` | `str` | Config default | Override the model for this conversation |
+| `is_plan_mode` | `bool` | `False` | Enable TodoList middleware for task tracking |
+| `subagent_enabled` | `bool` | `False` | Enable the `task` tool for delegating to sub-agents |
+| `max_concurrent_subagents` | `int` | `3` | Maximum number of parallel sub-agent tasks |
+| `agent_name` | `str` | `None` | Use a custom agent (requires custom agent setup) |
+
+## Thread State Schema
+
+DeerFlow extends LangGraph's `AgentState` with additional fields in `ThreadState`:
+
+```python
+class ThreadState(AgentState):
+    # Standard LangGraph fields
+    messages: list[Message]  # Conversation history
+    
+    # DeerFlow extensions
+    sandbox: SandboxState | None  # Sandbox connection info
+    thread_data: ThreadDataState | None  # Per-thread file paths
+    title: str | None  # Auto-generated thread title
+    artifacts: list[str]  # Presented output files
+    todos: list | None  # Task list (when plan_mode enabled)
+    uploaded_files: list[dict] | None  # User-uploaded files
+    viewed_images: dict[str, ViewedImageData]  # Image cache for vision models
+```
+
+### Thread Isolation
+
+Each thread gets isolated directories created by `ThreadDataMiddleware`:
+
+- **Workspace**: `backend/.deer-flow/threads/{thread_id}/user-data/workspace/`
+- **Uploads**: `backend/.deer-flow/threads/{thread_id}/user-data/uploads/`
+- **Outputs**: `backend/.deer-flow/threads/{thread_id}/user-data/outputs/`
+
+<Info>
+  Inside the agent's sandbox, these paths are mapped to `/mnt/user-data/workspace`, `/mnt/user-data/uploads`, and `/mnt/user-data/outputs`.
+</Info>
+
+## Agent Graph Structure
+
+The `lead_agent` graph is created using LangGraph's `create_agent()` API with:
+
+1. **Model**: Selected via `create_chat_model(name, thinking_enabled)`
+2. **Tools**: Combined from multiple sources via `get_available_tools()`
+3. **Middleware**: 11 middleware components processing requests/responses
+4. **System Prompt**: Generated by `apply_prompt_template()` with context injection
+5. **State Schema**: `ThreadState` with custom reducers
+
+### Middleware Chain
+
+Middlewares execute in strict order defined in `src/agents/lead_agent/agent.py:207`:
+
+1. `ThreadDataMiddleware` - Create per-thread directories
+2. `UploadsMiddleware` - Inject uploaded files into context
+3. `SandboxMiddleware` - Acquire and manage sandbox lifecycle
+4. `DanglingToolCallMiddleware` - Patch missing tool responses
+5. `SummarizationMiddleware` - Context reduction (optional)
+6. `TodoListMiddleware` - Task tracking (optional, plan_mode)
+7. `TitleMiddleware` - Auto-generate thread title
+8. `MemoryMiddleware` - Queue conversations for memory updates
+9. `ViewImageMiddleware` - Inject images for vision models
+10. `SubagentLimitMiddleware` - Enforce parallel task limits (optional)
+11. `ClarificationMiddleware` - Intercept clarification requests (always last)
+
+<Note>
+  Middleware order is critical for proper operation. See `backend/src/agents/lead_agent/agent.py:198` for detailed comments.
+</Note>
+
+## API Endpoints
+
+The LangGraph Server provides standard endpoints:
+
+- [Thread Management](/api/langgraph/threads) - Create, list, and manage conversation threads
+- [Streaming](/api/langgraph/streaming) - Stream agent responses with SSE
+- [State Management](/api/langgraph/threads#state-operations) - Get and update thread state
+- [Interrupts](/api/langgraph/threads#interrupts) - Handle clarification requests
+
+## Alternative: Embedded Python Client
+
+For Python applications running in the same process, use `DeerFlowClient` instead of HTTP:
+
+```python
+from src.client import DeerFlowClient
+
+client = DeerFlowClient()
+
+# Streaming response
+for event in client.stream("Hello!", thread_id="my-thread"):
+    if event.type == "messages-tuple":
+        print(event.data)
+
+# Synchronous chat
+response = client.chat("Analyze this code", thread_id="my-thread")
+print(response)
+```
+
+<Tip>
+  `DeerFlowClient` shares the same configuration files and data directories as LangGraph Server, but doesn't require any HTTP services.
+</Tip>
+
+See [Python Client API](/api/python-client/overview) for full documentation.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Thread Management" icon="comments" href="/api/langgraph/threads">
+    Learn how to create and manage conversation threads
+  </Card>
+  
+  <Card title="Streaming" icon="stream" href="/api/langgraph/streaming">
+    Stream agent responses with Server-Sent Events
+  </Card>
+  
+  <Card title="Python Client" icon="python" href="/api/python-client/overview">
+    Use the embedded Python client for in-process access
+  </Card>
+  
+  <Card title="Agent Configuration" icon="gear" href="/configuration/models">
+    Configure models, tools, and runtime behavior
+  </Card>
+</CardGroup>

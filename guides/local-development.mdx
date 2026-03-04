@@ -1,0 +1,472 @@
+---
+title: Local Development
+description: Run DeerFlow services locally without Docker for maximum control
+---
+
+## Overview
+
+Local development runs all services directly on your machine, giving you maximum control and flexibility. This is ideal for:
+
+- Deep debugging and development
+- Working with local development tools
+- Environments where Docker isn't available
+- Maximum performance on your hardware
+
+<Warning>
+  Local development requires installing Node.js, Python, uv, pnpm, and nginx on your machine. If you prefer a simpler setup, see [Docker Setup](/guides/docker-setup).
+</Warning>
+
+## Prerequisites
+
+Verify all required tools are installed:
+
+```bash
+make check
+```
+
+Required:
+- Node.js 22+
+- pnpm
+- uv (Python package manager)
+- nginx
+
+See [Installation Guide](/guides/installation) for setup instructions.
+
+## Architecture
+
+Local development runs these services:
+
+```
+nginx (port 2026) ← Unified entry point
+  ├→ Frontend (port 3000) ← Next.js dev server
+  ├→ Gateway API (port 8001) ← FastAPI application
+  └→ LangGraph Server (port 2024) ← Agent runtime
+```
+
+## Quick Start
+
+<Steps>
+  <Step title="Configure Application">
+    Ensure `config.yaml` is configured with your model and API keys:
+    
+    ```yaml config.yaml
+    models:
+      - name: gpt-4
+        display_name: GPT-4
+        use: langchain_openai:ChatOpenAI
+        model: gpt-4
+        api_key: $OPENAI_API_KEY
+        max_tokens: 4096
+    ```
+    
+    See [Installation Guide](/guides/installation#configure-your-model) for details.
+  </Step>
+
+  <Step title="Install Dependencies">
+    Install frontend and backend dependencies:
+    
+    ```bash
+    make install
+    ```
+    
+    This runs:
+    - `cd backend && uv sync` - Python dependencies
+    - `cd frontend && pnpm install` - Node.js dependencies
+  </Step>
+
+  <Step title="Start All Services">
+    Start all services with nginx reverse proxy:
+    
+    ```bash
+    make dev
+    ```
+    
+    This starts:
+    1. LangGraph server (port 2024)
+    2. Gateway API (port 8001)
+    3. Frontend (port 3000)
+    4. nginx reverse proxy (port 2026)
+    
+    <Info>
+      All services start automatically and run in the background. Press Ctrl+C to stop all services.
+    </Info>
+  </Step>
+
+  <Step title="Access Application">
+    Open your browser to:
+    
+    - **Web Interface**: [http://localhost:2026](http://localhost:2026)
+    - **API Gateway**: [http://localhost:2026/api/*](http://localhost:2026/api/)
+    - **LangGraph**: [http://localhost:2026/api/langgraph/*](http://localhost:2026/api/langgraph/)
+  </Step>
+</Steps>
+
+## Running Services Individually
+
+For more control, start each service in a separate terminal:
+
+<Tabs>
+  <Tab title="All Services">
+    Terminal 1 - LangGraph Server:
+    ```bash
+    cd backend
+    make dev
+    ```
+    
+    Terminal 2 - Gateway API:
+    ```bash
+    cd backend
+    make gateway
+    ```
+    
+    Terminal 3 - Frontend:
+    ```bash
+    cd frontend
+    pnpm dev
+    ```
+    
+    Terminal 4 - nginx:
+    ```bash
+    make nginx
+    # Or directly:
+    nginx -c $(pwd)/docker/nginx/nginx.local.conf -g 'daemon off;'
+    ```
+  </Tab>
+  
+  <Tab title="Backend Only">
+    Start backend services without frontend:
+    
+    ```bash
+    # Terminal 1 - LangGraph
+    cd backend
+    uv run langgraph dev --no-browser --allow-blocking
+    
+    # Terminal 2 - Gateway
+    cd backend
+    uv run uvicorn src.gateway.app:app --host 0.0.0.0 --port 8001 --reload
+    ```
+    
+    Access:
+    - LangGraph: [http://localhost:2024](http://localhost:2024)
+    - Gateway: [http://localhost:8001](http://localhost:8001)
+  </Tab>
+  
+  <Tab title="Frontend Only">
+    Start frontend in development mode:
+    
+    ```bash
+    cd frontend
+    pnpm dev
+    ```
+    
+    Access: [http://localhost:3000](http://localhost:3000)
+    
+    <Note>
+      Configure API endpoint in `frontend/.env` if backend is running elsewhere.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Service Details
+
+### LangGraph Server (Port 2024)
+
+The core agent runtime that executes agent logic, tools, and manages conversation state.
+
+**Entry Point**: `backend/src/agents/lead_agent/agent.py`
+
+**Start Command**:
+```bash
+cd backend
+uv run langgraph dev --no-browser --allow-blocking
+```
+
+**Features**:
+- SSE streaming for real-time responses
+- Thread state management
+- Middleware chain execution
+- Tool orchestration
+
+**Configuration**: `backend/langgraph.json`
+
+### Gateway API (Port 8001)
+
+FastAPI application providing REST endpoints for models, skills, MCP, uploads, and artifacts.
+
+**Entry Point**: `backend/src/gateway/app.py`
+
+**Start Command**:
+```bash
+cd backend
+uv run uvicorn src.gateway.app:app --host 0.0.0.0 --port 8001 --reload
+```
+
+**Endpoints**:
+- `/api/models` - Model management
+- `/api/mcp` - MCP server configuration
+- `/api/skills` - Skills management
+- `/api/threads/{id}/uploads` - File uploads
+- `/api/threads/{id}/artifacts` - Artifact serving
+
+### Frontend (Port 3000)
+
+Next.js application providing the web interface.
+
+**Start Command**:
+```bash
+cd frontend
+pnpm dev
+```
+
+**Features**:
+- React-based chat interface
+- Real-time SSE streaming
+- File upload support
+- Artifact rendering
+
+### nginx (Port 2026)
+
+Reverse proxy that unifies all services under a single port.
+
+**Configuration**: `docker/nginx/nginx.local.conf`
+
+**Start Command**:
+```bash
+nginx -c $(pwd)/docker/nginx/nginx.local.conf -g 'daemon off;'
+```
+
+**Routing**:
+- `/` → Frontend (3000)
+- `/api/langgraph/*` → LangGraph (2024)
+- `/api/*` → Gateway (8001)
+
+## Development Workflow
+
+### Hot Reload
+
+All services support hot reload:
+
+<CardGroup cols={2}>
+  <Card title="Frontend" icon="react">
+    Changes to `frontend/src/**` trigger automatic browser reload
+  </Card>
+  
+  <Card title="Backend" icon="python">
+    Changes to `backend/src/**` automatically restart services (with `--reload` flag)
+  </Card>
+  
+  <Card title="Config" icon="gear">
+    Changes to `config.yaml` require manual service restart
+  </Card>
+  
+  <Card title="Skills" icon="wand-magic-sparkles">
+    Changes to `skills/**` are loaded dynamically by the agent
+  </Card>
+</CardGroup>
+
+### Logs
+
+View logs in separate terminal windows or check log files:
+
+```bash
+# View logs (when using make dev)
+tail -f logs/langgraph.log
+tail -f logs/gateway.log
+tail -f logs/frontend.log
+tail -f logs/nginx.log
+```
+
+### Testing
+
+<Tabs>
+  <Tab title="Backend Tests">
+    ```bash
+    cd backend
+    uv run pytest
+    
+    # Run specific test
+    uv run pytest tests/test_config.py
+    
+    # Run with coverage
+    uv run pytest --cov=src
+    ```
+  </Tab>
+  
+  <Tab title="Frontend Tests">
+    ```bash
+    cd frontend
+    pnpm test
+    
+    # Watch mode
+    pnpm test:watch
+    ```
+  </Tab>
+</Tabs>
+
+### Debugging
+
+<Steps>
+  <Step title="Backend Debugging">
+    Add breakpoints using Python debugger:
+    
+    ```python
+    import pdb; pdb.set_trace()
+    ```
+    
+    Or use VS Code debugger with launch configuration.
+  </Step>
+  
+  <Step title="Frontend Debugging">
+    Use browser DevTools:
+    - Console for logs
+    - Network tab for API requests
+    - React DevTools for component inspection
+  </Step>
+  
+  <Step title="API Debugging">
+    Use curl or tools like Postman:
+    
+    ```bash
+    # Test Gateway API
+    curl http://localhost:8001/api/models
+    
+    # Test LangGraph
+    curl http://localhost:2024/threads
+    ```
+  </Step>
+</Steps>
+
+## Stopping Services
+
+<CodeGroup>
+```bash Stop All (make dev)
+# Press Ctrl+C in the terminal running make dev
+# Or run:
+make stop
+```
+
+```bash Stop Individual Services
+# Find and kill processes
+pkill -f "langgraph dev"
+pkill -f "uvicorn src.gateway.app:app"
+pkill -f "next dev"
+pkill nginx
+```
+
+```bash Clean Up
+# Stop services and clean logs
+make clean
+```
+</CodeGroup>
+
+## Project Structure
+
+Understanding the codebase:
+
+```
+deer-flow/
+├── config.yaml              # Main configuration
+├── .env                     # Environment variables
+├── Makefile                 # Build and dev commands
+├── backend/
+│   ├── src/
+│   │   ├── agents/          # LangGraph agent logic
+│   │   ├── gateway/         # FastAPI Gateway
+│   │   ├── tools/           # Built-in tools
+│   │   ├── sandbox/         # Sandbox execution
+│   │   ├── models/          # Model factory
+│   │   ├── skills/          # Skills system
+│   │   └── mcp/             # MCP integration
+│   ├── tests/               # Backend tests
+│   └── pyproject.toml       # Python dependencies
+├── frontend/
+│   ├── src/
+│   │   ├── app/             # Next.js app router
+│   │   ├── components/      # React components
+│   │   └── lib/             # Utility functions
+│   └── package.json         # Node dependencies
+├── skills/
+│   ├── public/              # Built-in skills
+│   └── custom/              # User-created skills
+└── docker/
+    └── nginx/               # nginx configurations
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Services fail to start">
+    Check if ports are already in use:
+    ```bash
+    lsof -i :2026  # nginx
+    lsof -i :3000  # frontend
+    lsof -i :8001  # gateway
+    lsof -i :2024  # langgraph
+    ```
+    
+    Stop conflicting processes:
+    ```bash
+    make stop
+    ```
+  </Accordion>
+  
+  <Accordion title="Module not found errors">
+    Reinstall dependencies:
+    ```bash
+    make install
+    ```
+    
+    Or individually:
+    ```bash
+    cd backend && uv sync
+    cd frontend && pnpm install
+    ```
+  </Accordion>
+  
+  <Accordion title="nginx fails to start">
+    Check nginx configuration:
+    ```bash
+    nginx -t -c $(pwd)/docker/nginx/nginx.local.conf
+    ```
+    
+    Ensure nginx is installed:
+    ```bash
+    which nginx
+    ```
+  </Accordion>
+  
+  <Accordion title="Hot reload not working">
+    For backend, ensure `--reload` flag is used:
+    ```bash
+    cd backend
+    uv run uvicorn src.gateway.app:app --reload
+    ```
+    
+    For frontend, check file watcher limits:
+    ```bash
+    # macOS/Linux
+    echo fs.inotify.max_user_watches=524288 | sudo tee -a /etc/sysctl.conf
+    sudo sysctl -p
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Docker Setup" icon="docker" href="/guides/docker-setup">
+    Try Docker development for easier environment management
+  </Card>
+  
+  <Card title="Creating Skills" icon="wand-magic-sparkles" href="/guides/creating-skills">
+    Extend DeerFlow with custom skills
+  </Card>
+  
+  <Card title="Custom Tools" icon="wrench" href="/guides/custom-tools">
+    Add custom tools to the agent
+  </Card>
+  
+  <Card title="File Uploads" icon="file-arrow-up" href="/guides/file-uploads">
+    Implement file upload functionality
+  </Card>
+</CardGroup>

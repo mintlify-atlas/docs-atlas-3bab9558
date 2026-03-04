@@ -1,0 +1,457 @@
+---
+title: 'Uploads API'
+description: 'Upload and manage user files for threads'
+---
+
+## Overview
+
+The Uploads API provides endpoints to upload, list, and delete files for specific threads. Uploaded files are stored in thread-specific directories and can be accessed by AI agents. Certain file types (PDF, Office documents) are automatically converted to markdown.
+
+## Upload Files
+
+<Card title="POST /api/threads/{thread_id}/uploads" icon="upload">
+  Upload multiple files to a thread's uploads directory
+</Card>
+
+### Path Parameters
+
+<ParamField path="thread_id" type="string" required>
+  The thread ID to upload files to
+</ParamField>
+
+### Request Body
+
+Multipart form data with one or more files:
+
+<ParamField body="files" type="file[]" required>
+  List of files to upload (multipart/form-data)
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Whether the upload was successful
+</ResponseField>
+
+<ResponseField name="files" type="array" required>
+  List of uploaded file information
+  
+  <Expandable title="File Info Object">
+    <ResponseField name="filename" type="string" required>
+      Name of the uploaded file
+    </ResponseField>
+    
+    <ResponseField name="size" type="string" required>
+      File size in bytes (as string)
+    </ResponseField>
+    
+    <ResponseField name="path" type="string" required>
+      Actual filesystem path (relative to backend/)
+    </ResponseField>
+    
+    <ResponseField name="virtual_path" type="string" required>
+      Path for Agent in sandbox (e.g., `/mnt/user-data/uploads/file.txt`)
+    </ResponseField>
+    
+    <ResponseField name="artifact_url" type="string" required>
+      HTTP URL to access the file via artifacts API
+    </ResponseField>
+    
+    <ResponseField name="markdown_file" type="string">
+      Name of converted markdown file (if applicable)
+    </ResponseField>
+    
+    <ResponseField name="markdown_path" type="string">
+      Filesystem path to markdown file
+    </ResponseField>
+    
+    <ResponseField name="markdown_virtual_path" type="string">
+      Virtual path to markdown file in sandbox
+    </ResponseField>
+    
+    <ResponseField name="markdown_artifact_url" type="string">
+      HTTP URL to access the markdown file
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Success message with upload count
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST http://localhost:8001/api/threads/abc123/uploads \
+  -F "files=@document.pdf" \
+  -F "files=@image.png" \
+  -F "files=@data.csv"
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "files": [
+    {
+      "filename": "document.pdf",
+      "size": "1048576",
+      "path": "sandbox/threads/abc123/uploads/document.pdf",
+      "virtual_path": "/mnt/user-data/uploads/document.pdf",
+      "artifact_url": "/api/threads/abc123/artifacts/mnt/user-data/uploads/document.pdf",
+      "markdown_file": "document.md",
+      "markdown_path": "sandbox/threads/abc123/uploads/document.md",
+      "markdown_virtual_path": "/mnt/user-data/uploads/document.md",
+      "markdown_artifact_url": "/api/threads/abc123/artifacts/mnt/user-data/uploads/document.md"
+    },
+    {
+      "filename": "image.png",
+      "size": "524288",
+      "path": "sandbox/threads/abc123/uploads/image.png",
+      "virtual_path": "/mnt/user-data/uploads/image.png",
+      "artifact_url": "/api/threads/abc123/artifacts/mnt/user-data/uploads/image.png"
+    },
+    {
+      "filename": "data.csv",
+      "size": "2048",
+      "path": "sandbox/threads/abc123/uploads/data.csv",
+      "virtual_path": "/mnt/user-data/uploads/data.csv",
+      "artifact_url": "/api/threads/abc123/artifacts/mnt/user-data/uploads/data.csv"
+    }
+  ],
+  "message": "Successfully uploaded 3 file(s)"
+}
+```
+
+### Auto-Conversion to Markdown
+
+The following file types are automatically converted to markdown using [markitdown](https://github.com/microsoft/markitdown):
+
+- `.pdf` - PDF documents
+- `.ppt`, `.pptx` - PowerPoint presentations
+- `.xls`, `.xlsx` - Excel spreadsheets
+- `.doc`, `.docx` - Word documents
+
+Both the original file and the converted markdown file are saved and accessible.
+
+### Error Responses
+
+<ResponseField name="400" type="Bad Request">
+  No files provided or invalid filename
+  
+  ```json
+  {
+    "detail": "No files provided"
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="500" type="Internal Server Error">
+  Upload failed
+  
+  ```json
+  {
+    "detail": "Failed to upload file.pdf: [error details]"
+  }
+  ```
+</ResponseField>
+
+### Security
+
+- Filenames are sanitized to prevent path traversal attacks
+- Only the filename component is used (directory paths are stripped)
+- Files with unsafe names (`.`, `..`, containing `/` or `\`) are rejected
+
+---
+
+## List Uploaded Files
+
+<Card title="GET /api/threads/{thread_id}/uploads/list" icon="list">
+  List all files in a thread's uploads directory
+</Card>
+
+### Path Parameters
+
+<ParamField path="thread_id" type="string" required>
+  The thread ID to list files for
+</ParamField>
+
+### Response
+
+<ResponseField name="files" type="array" required>
+  List of files with metadata
+  
+  <Expandable title="File Object">
+    <ResponseField name="filename" type="string" required>
+      Name of the file
+    </ResponseField>
+    
+    <ResponseField name="size" type="integer" required>
+      File size in bytes
+    </ResponseField>
+    
+    <ResponseField name="path" type="string" required>
+      Actual filesystem path
+    </ResponseField>
+    
+    <ResponseField name="virtual_path" type="string" required>
+      Path for Agent in sandbox
+    </ResponseField>
+    
+    <ResponseField name="artifact_url" type="string" required>
+      HTTP URL to access the file
+    </ResponseField>
+    
+    <ResponseField name="extension" type="string" required>
+      File extension (e.g., `.pdf`, `.png`)
+    </ResponseField>
+    
+    <ResponseField name="modified" type="number" required>
+      Last modified timestamp (Unix timestamp)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="count" type="integer" required>
+  Total number of files
+</ResponseField>
+
+### Example Request
+
+```bash
+curl http://localhost:8001/api/threads/abc123/uploads/list
+```
+
+### Example Response
+
+```json
+{
+  "files": [
+    {
+      "filename": "document.pdf",
+      "size": 1048576,
+      "path": "sandbox/threads/abc123/uploads/document.pdf",
+      "virtual_path": "/mnt/user-data/uploads/document.pdf",
+      "artifact_url": "/api/threads/abc123/artifacts/mnt/user-data/uploads/document.pdf",
+      "extension": ".pdf",
+      "modified": 1705318200.0
+    },
+    {
+      "filename": "document.md",
+      "size": 4096,
+      "path": "sandbox/threads/abc123/uploads/document.md",
+      "virtual_path": "/mnt/user-data/uploads/document.md",
+      "artifact_url": "/api/threads/abc123/artifacts/mnt/user-data/uploads/document.md",
+      "extension": ".md",
+      "modified": 1705318201.0
+    }
+  ],
+  "count": 2
+}
+```
+
+### Empty Directory
+
+If no files have been uploaded:
+
+```json
+{
+  "files": [],
+  "count": 0
+}
+```
+
+---
+
+## Delete Uploaded File
+
+<Card title="DELETE /api/threads/{thread_id}/uploads/{filename}" icon="trash">
+  Delete a file from a thread's uploads directory
+</Card>
+
+### Path Parameters
+
+<ParamField path="thread_id" type="string" required>
+  The thread ID
+</ParamField>
+
+<ParamField path="filename" type="string" required>
+  The filename to delete
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Whether the deletion was successful
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Success message
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X DELETE http://localhost:8001/api/threads/abc123/uploads/document.pdf
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "message": "Deleted document.pdf"
+}
+```
+
+### Error Responses
+
+<ResponseField name="403" type="Forbidden">
+  Access denied (path traversal attempt)
+  
+  ```json
+  {
+    "detail": "Access denied"
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="404" type="Not Found">
+  File not found
+  
+  ```json
+  {
+    "detail": "File not found: document.pdf"
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="500" type="Internal Server Error">
+  Deletion failed
+  
+  ```json
+  {
+    "detail": "Failed to delete document.pdf: [error details]"
+  }
+  ```
+</ResponseField>
+
+---
+
+## File Storage
+
+### Directory Structure
+
+```
+backend/
+└── sandbox/
+    └── threads/
+        └── {thread_id}/
+            └── uploads/
+                ├── document.pdf
+                ├── document.md  (auto-converted)
+                ├── image.png
+                └── data.csv
+```
+
+### Virtual Paths
+
+Files are accessible to AI agents via virtual paths:
+
+```
+/mnt/user-data/uploads/{filename}
+```
+
+Agents can read and process these files using their file tools.
+
+### Sandbox Synchronization
+
+For non-local sandboxes (e.g., E2B), files are automatically synced:
+
+1. **Upload**: Files are saved to host storage and synced to sandbox
+2. **Agent Access**: Agents read files from sandbox virtual paths
+3. **Source of Truth**: Host storage remains the source of truth
+
+---
+
+## Use Cases
+
+### Upload Files from Frontend
+
+```typescript
+async function uploadFiles(threadId: string, files: File[]) {
+  const formData = new FormData();
+  files.forEach(file => {
+    formData.append('files', file);
+  });
+  
+  const response = await fetch(
+    `http://localhost:8001/api/threads/${threadId}/uploads`,
+    {
+      method: 'POST',
+      body: formData
+    }
+  );
+  
+  return response.json();
+}
+```
+
+### List and Display Files
+
+```typescript
+async function listFiles(threadId: string) {
+  const response = await fetch(
+    `http://localhost:8001/api/threads/${threadId}/uploads/list`
+  );
+  const { files, count } = await response.json();
+  
+  return files.map(file => ({
+    name: file.filename,
+    size: file.size,
+    url: `http://localhost:8001${file.artifact_url}`,
+    modified: new Date(file.modified * 1000)
+  }));
+}
+```
+
+### Delete File
+
+```typescript
+async function deleteFile(threadId: string, filename: string) {
+  const response = await fetch(
+    `http://localhost:8001/api/threads/${threadId}/uploads/${filename}`,
+    { method: 'DELETE' }
+  );
+  return response.json();
+}
+```
+
+### Access Uploaded Files
+
+After uploading, files can be accessed via:
+
+1. **Artifacts API**: `GET /api/threads/{thread_id}/artifacts/mnt/user-data/uploads/{filename}`
+2. **Agent Tools**: Agents can read files using their virtual paths
+
+```typescript
+// Download file
+const response = await fetch(
+  `http://localhost:8001/api/threads/abc123/artifacts/mnt/user-data/uploads/document.pdf?download=true`
+);
+const blob = await response.blob();
+```
+
+---
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Artifacts API" icon="file" href="/api/gateway/artifacts">
+    Access uploaded files
+  </Card>
+  <Card title="Gateway Overview" icon="book" href="/api/gateway/overview">
+    Learn about the Gateway API
+  </Card>
+</CardGroup>

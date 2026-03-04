@@ -1,0 +1,661 @@
+---
+title: Kubernetes Deployment
+description: Deploy DeerFlow on Kubernetes with the provisioner service for isolated pod-based sandboxes
+---
+
+Deploy DeerFlow on Kubernetes for production-grade isolation and scalability. The provisioner service dynamically creates sandbox pods for each execution context.
+
+## Architecture
+
+```
+┌────────────┐  HTTP  ┌─────────────┐  K8s API  ┌──────────────┐
+│  Backend   │ ─────▸ │ Provisioner │ ────────▸ │  K8s API     │
+│ (Gateway/  │        │   :8002     │           │  Server      │
+│ LangGraph) │        └─────────────┘           └──────┬───────┘
+└────────────┘                                          │ creates
+                                                        │
+                          ┌─────────────┐         ┌────▼─────┐
+                          │   Backend   │ ──────▸ │  Sandbox │
+                          │   (via      │ NodePort│  Pod(s)  │
+                          │   network)  │         └──────────┘
+                          └─────────────┘
+```
+
+### How It Works
+
+1. **Backend requests sandbox**: POST `/api/sandboxes` with `sandbox_id` and `thread_id`
+2. **Provisioner creates Pod**: Deploys sandbox container with mounted volumes
+3. **Service created**: NodePort service exposes pod on dynamic port
+4. **Backend accesses sandbox**: Direct HTTP access via `http://NODE_HOST:{NodePort}`
+5. **Cleanup**: DELETE `/api/sandboxes/{sandbox_id}` removes pod and service
+
+## Prerequisites
+
+### Kubernetes Cluster
+
+You need a running Kubernetes cluster. Supported options:
+
+- **Docker Desktop** with Kubernetes enabled
+- **OrbStack** (macOS) with built-in K8s
+- **minikube** for local development
+- **kind** for local development
+- **k3s** for lightweight production
+- **Cloud providers**: EKS, GKE, AKS
+
+### Enable Kubernetes in Docker Desktop
+
+1. Open Docker Desktop settings
+2. Go to "Kubernetes" tab
+3. Check "Enable Kubernetes"
+4. Click "Apply & Restart"
+5. Wait for Kubernetes to start (green indicator)
+
+### Enable Kubernetes in OrbStack
+
+1. Open OrbStack settings
+2. Go to "Kubernetes" tab
+3. Check "Enable Kubernetes"
+
+### Verify Cluster
+
+```bash
+# Check cluster status
+kubectl cluster-info
+
+# Verify nodes
+kubectl get nodes
+
+# Check current context
+kubectl config current-context
+```
+
+## Configuration
+
+### 1. Configure Sandbox Mode
+
+Edit `config.yaml` to enable provisioner mode:
+
+```yaml
+sandbox:
+  use: src.community.aio_sandbox:AioSandboxProvider
+  provisioner_url: http://provisioner:8002
+```
+
+### 2. Set Environment Variables
+
+Edit `docker/docker-compose-dev.yaml` to configure provisioner:
+
+```yaml
+provisioner:
+  environment:
+    # Kubernetes namespace for sandbox resources
+    - K8S_NAMESPACE=deer-flow
+    
+    # Sandbox container image
+    - SANDBOX_IMAGE=enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+    
+    # Host paths (must be absolute paths on your machine)
+    - SKILLS_HOST_PATH=${DEER_FLOW_ROOT}/skills
+    - THREADS_HOST_PATH=${DEER_FLOW_ROOT}/backend/.deer-flow/threads
+    
+    # Path to kubeconfig inside container
+    - KUBECONFIG_PATH=/root/.kube/config
+    
+    # Host that backend uses to reach NodePort services
+    - NODE_HOST=host.docker.internal
+    
+    # Override K8s API server URL (if needed)
+    - K8S_API_SERVER=https://host.docker.internal:6443
+```
+
+### 3. Set Host Paths
+
+**Important**: `SKILLS_HOST_PATH` and `THREADS_HOST_PATH` must be **absolute paths** on your host machine:
+
+```bash
+# Set environment variable before starting
+export DEER_FLOW_ROOT=$(pwd)
+
+# Or hardcode in docker-compose-dev.yaml:
+# SKILLS_HOST_PATH=/Users/yourname/deer-flow/skills
+# THREADS_HOST_PATH=/Users/yourname/deer-flow/backend/.deer-flow/threads
+```
+
+## Provisioner Service
+
+### Docker Compose Configuration
+
+The provisioner service is defined in `docker/docker-compose-dev.yaml`:
+
+```yaml
+provisioner:
+  profiles:
+    - provisioner
+  build:
+    context: ./provisioner
+    dockerfile: Dockerfile
+  container_name: deer-flow-provisioner
+  volumes:
+    - ~/.kube/config:/root/.kube/config:ro
+  environment:
+    - K8S_NAMESPACE=deer-flow
+    - SANDBOX_IMAGE=enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+    - SKILLS_HOST_PATH=${DEER_FLOW_ROOT}/skills
+    - THREADS_HOST_PATH=${DEER_FLOW_ROOT}/backend/.deer-flow/threads
+    - KUBECONFIG_PATH=/root/.kube/config
+    - NODE_HOST=host.docker.internal
+    - K8S_API_SERVER=https://host.docker.internal:6443
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  networks:
+    - deer-flow-dev
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+    interval: 10s
+    timeout: 5s
+    retries: 6
+    start_period: 15s
+```
+
+### Provisioner Dockerfile
+
+From `docker/provisioner/Dockerfile`:
+
+```dockerfile
+FROM python:3.12-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+RUN pip install --no-cache-dir \
+    fastapi \
+    "uvicorn[standard]" \
+    kubernetes
+
+WORKDIR /app
+COPY app.py .
+
+EXPOSE 8002
+
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8002"]
+```
+
+## Deployment
+
+### Start with Provisioner
+
+```bash
+# Start all services including provisioner
+make docker-start
+
+# The script automatically detects provisioner mode from config.yaml
+# and starts provisioner only when needed
+```
+
+### Verify Provisioner
+
+```bash
+# Check provisioner health
+curl http://localhost:8002/health
+
+# Expected output:
+# {"status":"ok"}
+
+# Check provisioner logs
+docker logs deer-flow-provisioner
+```
+
+### Verify Namespace
+
+```bash
+# Check if namespace was created
+kubectl get namespace deer-flow
+
+# Expected output:
+# NAME        STATUS   AGE
+# deer-flow   Active   1m
+```
+
+## Sandbox Pod Configuration
+
+### Pod Specification
+
+Each sandbox runs as a Kubernetes Pod with:
+
+```yaml
+spec:
+  containers:
+    - name: sandbox
+      image: enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+      imagePullPolicy: IfNotPresent
+      ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+      
+      # Resource limits
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+          ephemeral-storage: 500Mi
+        limits:
+          cpu: 1000m
+          memory: 1Gi
+          ephemeral-storage: 500Mi
+      
+      # Volume mounts
+      volumeMounts:
+        - name: skills
+          mountPath: /mnt/skills
+          readOnly: true
+        - name: user-data
+          mountPath: /mnt/user-data
+          readOnly: false
+      
+      # Health checks
+      readinessProbe:
+        httpGet:
+          path: /v1/sandbox
+          port: 8080
+        initialDelaySeconds: 5
+        periodSeconds: 5
+      
+      livenessProbe:
+        httpGet:
+          path: /v1/sandbox
+          port: 8080
+        initialDelaySeconds: 10
+        periodSeconds: 10
+  
+  # Volumes (HostPath)
+  volumes:
+    - name: skills
+      hostPath:
+        path: /absolute/path/to/skills
+        type: Directory
+    - name: user-data
+      hostPath:
+        path: /absolute/path/to/threads/{thread_id}/user-data
+        type: DirectoryOrCreate
+```
+
+### Service Specification
+
+Each sandbox gets a NodePort service:
+
+```yaml
+spec:
+  type: NodePort
+  selector:
+    sandbox-id: abc-123
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+      # nodePort: auto-allocated by Kubernetes (30000-32767)
+```
+
+## API Reference
+
+### Health Check
+
+```bash
+GET /health
+```
+
+Response:
+```json
+{
+  "status": "ok"
+}
+```
+
+### Create Sandbox
+
+```bash
+POST /api/sandboxes
+Content-Type: application/json
+
+{
+  "sandbox_id": "abc-123",
+  "thread_id": "thread-456"
+}
+```
+
+Response:
+```json
+{
+  "sandbox_id": "abc-123",
+  "sandbox_url": "http://host.docker.internal:32123",
+  "status": "Pending"
+}
+```
+
+**Status Values:**
+- `Pending` - Pod is being created
+- `Running` - Pod is ready
+- `Succeeded` - Pod completed successfully
+- `Failed` - Pod failed to start
+- `Unknown` - Status cannot be determined
+
+### Get Sandbox Status
+
+```bash
+GET /api/sandboxes/{sandbox_id}
+```
+
+Response:
+```json
+{
+  "sandbox_id": "abc-123",
+  "sandbox_url": "http://host.docker.internal:32123",
+  "status": "Running"
+}
+```
+
+### List Sandboxes
+
+```bash
+GET /api/sandboxes
+```
+
+Response:
+```json
+{
+  "sandboxes": [
+    {
+      "sandbox_id": "abc-123",
+      "sandbox_url": "http://host.docker.internal:32123",
+      "status": "Running"
+    }
+  ],
+  "count": 1
+}
+```
+
+### Delete Sandbox
+
+```bash
+DELETE /api/sandboxes/{sandbox_id}
+```
+
+Response:
+```json
+{
+  "ok": true,
+  "sandbox_id": "abc-123"
+}
+```
+
+## Testing
+
+### Manual Testing
+
+```bash
+# 1. Create a sandbox
+curl -X POST http://localhost:8002/api/sandboxes \
+  -H "Content-Type: application/json" \
+  -d '{"sandbox_id":"test-001","thread_id":"thread-001"}'
+
+# 2. Check sandbox status
+curl http://localhost:8002/api/sandboxes/test-001
+
+# 3. Verify pod and service
+kubectl get pod,svc -n deer-flow -l sandbox-id=test-001
+
+# 4. Check pod logs
+kubectl logs -n deer-flow sandbox-test-001
+
+# 5. Access sandbox from backend
+SANDBOX_URL=$(curl -s http://localhost:8002/api/sandboxes/test-001 | jq -r .sandbox_url)
+docker exec deer-flow-gateway curl -s $SANDBOX_URL/v1/sandbox
+
+# 6. Delete sandbox
+curl -X DELETE http://localhost:8002/api/sandboxes/test-001
+```
+
+### Integration Testing
+
+Test through the DeerFlow application:
+
+1. Open http://localhost:2026
+2. Create a new thread
+3. Send a message that requires code execution (e.g., "Create a Python script")
+4. Monitor pod creation:
+   ```bash
+   watch kubectl get pods -n deer-flow
+   ```
+5. Check sandbox logs:
+   ```bash
+   kubectl logs -n deer-flow -l app=deer-flow-sandbox --follow
+   ```
+
+## Troubleshooting
+
+### Kubeconfig Not Found
+
+**Symptom**: `Kubeconfig not found at /root/.kube/config`
+
+**Solution**:
+```bash
+# Verify kubeconfig exists
+ls -la ~/.kube/config
+
+# Check volume mount in docker-compose
+# Should be: ~/.kube/config:/root/.kube/config:ro
+
+# Verify inside container
+docker exec deer-flow-provisioner ls -la /root/.kube/config
+```
+
+### Connection Refused to K8s API
+
+**Symptom**: `Connection refused` when connecting to Kubernetes API
+
+**Solution**:
+
+1. Check kubeconfig server address:
+   ```bash
+   kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}'
+   ```
+
+2. If it's `localhost` or `127.0.0.1`, set `K8S_API_SERVER`:
+   ```yaml
+   environment:
+     - K8S_API_SERVER=https://host.docker.internal:6443
+   ```
+
+3. For Docker Desktop, the port is usually `6443`
+4. For k3s/OrbStack, check the actual port
+
+### Invalid HostPath
+
+**Symptom**: `Unprocessable Entity` when creating pod
+
+**Solution**:
+
+1. Use **absolute paths** only:
+   ```bash
+   # Good
+   SKILLS_HOST_PATH=/Users/yourname/deer-flow/skills
+   
+   # Bad
+   SKILLS_HOST_PATH=../skills
+   SKILLS_HOST_PATH=~/deer-flow/skills
+   ```
+
+2. Verify paths exist:
+   ```bash
+   ls -la /Users/yourname/deer-flow/skills
+   ls -la /Users/yourname/deer-flow/backend/.deer-flow/threads
+   ```
+
+### Pod Stuck in ContainerCreating
+
+**Symptom**: Pod stays in `ContainerCreating` state
+
+**Diagnosis**:
+```bash
+kubectl describe pod -n deer-flow sandbox-XXX
+```
+
+**Common causes**:
+- Pulling sandbox image (wait or pre-pull with `make docker-init`)
+- HostPath volume not accessible
+- Insufficient resources on node
+
+**Solution**:
+```bash
+# Pre-pull image
+make docker-init
+
+# Check node resources
+kubectl top nodes
+
+# Check events
+kubectl get events -n deer-flow --sort-by='.lastTimestamp'
+```
+
+### Cannot Access Sandbox URL
+
+**Symptom**: Backend cannot reach `http://host.docker.internal:{NodePort}`
+
+**Solution**:
+
+1. Verify service exists:
+   ```bash
+   kubectl get svc -n deer-flow
+   ```
+
+2. Test from host:
+   ```bash
+   curl http://localhost:NODE_PORT/v1/sandbox
+   ```
+
+3. Check `extra_hosts` in docker-compose (Linux only):
+   ```yaml
+   extra_hosts:
+     - "host.docker.internal:host-gateway"
+   ```
+
+4. Verify `NODE_HOST` environment variable
+
+## Production Considerations
+
+### Resource Limits
+
+Adjust pod resource limits based on workload:
+
+```python
+# In provisioner app.py, modify _build_pod()
+resources=k8s_client.V1ResourceRequirements(
+    requests={
+        "cpu": "500m",      # Increase for CPU-heavy tasks
+        "memory": "512Mi",  # Increase for memory-heavy tasks
+        "ephemeral-storage": "1Gi",
+    },
+    limits={
+        "cpu": "2000m",
+        "memory": "2Gi",
+        "ephemeral-storage": "2Gi",
+    },
+)
+```
+
+### Persistent Storage
+
+For production, consider using PersistentVolumes instead of HostPath:
+
+```yaml
+volumes:
+  - name: user-data
+    persistentVolumeClaim:
+      claimName: sandbox-pvc-${sandbox_id}
+```
+
+### Network Policies
+
+Restrict sandbox network access:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-network-policy
+  namespace: deer-flow
+spec:
+  podSelector:
+    matchLabels:
+      app: deer-flow-sandbox
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+      - podSelector:
+          matchLabels:
+            app: deer-flow-backend
+  egress:
+    - to:
+      - namespaceSelector: {}
+```
+
+### Automatic Cleanup
+
+Implement TTL for stale sandboxes:
+
+```python
+# Add to provisioner app.py
+from datetime import datetime, timedelta
+
+@app.on_event("startup")
+async def cleanup_old_sandboxes():
+    # Run every hour
+    while True:
+        await asyncio.sleep(3600)
+        await cleanup_stale_sandboxes(max_age=timedelta(hours=2))
+```
+
+### Monitoring
+
+Integrate with Prometheus:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: provisioner-metrics
+  namespace: deer-flow
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8002"
+    prometheus.io/path: "/metrics"
+spec:
+  selector:
+    app: deer-flow-provisioner
+  ports:
+    - port: 8002
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Production Deployment" icon="server" href="/deployment/production">
+    Production best practices and optimization
+  </Card>
+  <Card title="Docker Deployment" icon="docker" href="/deployment/docker">
+    Learn about Docker-based deployment
+  </Card>
+</CardGroup>
+
+## See Also
+
+- [Sandbox Configuration](/configuration/sandbox) - Configure sandbox modes
+- [Provisioner README](https://github.com/bytedance/deer-flow/blob/main/docker/provisioner/README.md) - Detailed provisioner documentation
+- [Kubernetes Documentation](https://kubernetes.io/docs/home/) - Official Kubernetes docs

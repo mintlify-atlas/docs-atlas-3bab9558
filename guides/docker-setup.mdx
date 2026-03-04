@@ -1,0 +1,406 @@
+---
+title: Docker Setup
+description: Set up DeerFlow using Docker for a consistent development environment
+---
+
+## Overview
+
+Docker development provides the most consistent and hassle-free DeerFlow experience. All dependencies are pre-configured in containers, eliminating environment-specific issues.
+
+<Info>
+  **Docker is the recommended approach** for most developers. You don't need to install Node.js, Python, or nginx on your local machine.
+</Info>
+
+## Benefits
+
+<CardGroup cols={2}>
+  <Card title="Consistency" icon="check-double">
+    Same environment across different machines and operating systems
+  </Card>
+  
+  <Card title="Isolation" icon="box">
+    Services run in isolated containers without affecting your system
+  </Card>
+  
+  <Card title="No Local Dependencies" icon="xmark">
+    No need to install Node.js, Python, uv, pnpm, or nginx locally
+  </Card>
+  
+  <Card title="Easy Cleanup" icon="trash">
+    Simple to reset and clean up with Docker commands
+  </Card>
+</CardGroup>
+
+## Prerequisites
+
+### Required
+
+- **Docker Desktop** or **Docker Engine**
+  - [Download Docker Desktop](https://docs.docker.com/get-docker/)
+  - On macOS, [OrbStack](https://orbstack.dev/) is a lightweight alternative
+
+### Optional
+
+- **pnpm** - For dependency caching optimization
+  ```bash
+  npm install -g pnpm
+  ```
+
+## Docker Architecture
+
+The Docker development environment consists of multiple services:
+
+```
+Host Machine
+  ↓
+Docker Compose (deer-flow-dev)
+  ├→ nginx (port 2026) ← Reverse proxy
+  ├→ web (port 3000) ← Frontend with hot-reload
+  ├→ api (port 8001) ← Gateway API with hot-reload
+  ├→ langgraph (port 2024) ← LangGraph server with hot-reload
+  └→ provisioner (optional, port 8002) ← Kubernetes sandbox provisioner
+```
+
+<Info>
+  All services have hot-reload enabled, so your code changes are automatically reflected without restarting containers.
+</Info>
+
+## Setup Steps
+
+<Steps>
+  <Step title="Configure the Application">
+    Create and configure your settings:
+    
+    ```bash
+    # Copy example configuration
+    cp config.example.yaml config.yaml
+    ```
+    
+    Edit `config.yaml` to configure your model and API keys:
+    
+    ```yaml config.yaml
+    models:
+      - name: gpt-4
+        display_name: GPT-4
+        use: langchain_openai:ChatOpenAI
+        model: gpt-4
+        api_key: $OPENAI_API_KEY
+        max_tokens: 4096
+    ```
+    
+    Set your API keys:
+    ```bash
+    export OPENAI_API_KEY="your-key-here"
+    # Or edit .env file
+    ```
+  </Step>
+
+  <Step title="Initialize Docker Environment">
+    Build Docker images and install dependencies (first time only):
+    
+    ```bash
+    make docker-init
+    ```
+    
+    This command:
+    - Builds Docker images for all services
+    - Installs frontend dependencies using pnpm
+    - Installs backend dependencies using uv
+    - Shares pnpm cache with host for faster builds
+    - Pre-pulls the sandbox container image
+    
+    <Note>
+      This step may take several minutes on the first run as it downloads and builds everything.
+    </Note>
+  </Step>
+
+  <Step title="Start Development Services">
+    Start all services with hot-reload:
+    
+    ```bash
+    make docker-start
+    ```
+    
+    DeerFlow automatically detects your sandbox mode from `config.yaml`:
+    - **Local/Docker sandbox**: Starts nginx, frontend, gateway, and langgraph
+    - **Provisioner/Kubernetes sandbox**: Additionally starts the provisioner service
+    
+    All services start with hot-reload enabled:
+    - Frontend changes reload automatically
+    - Backend changes trigger automatic restart
+    - LangGraph server supports hot-reload
+  </Step>
+
+  <Step title="Access the Application">
+    Once all services are running, access DeerFlow at:
+    
+    - **Web Interface**: [http://localhost:2026](http://localhost:2026)
+    - **API Gateway**: [http://localhost:2026/api/*](http://localhost:2026/api/)
+    - **LangGraph API**: [http://localhost:2026/api/langgraph/*](http://localhost:2026/api/langgraph/)
+  </Step>
+</Steps>
+
+## Docker Commands
+
+### Essential Commands
+
+<CodeGroup>
+```bash Start Services
+make docker-start
+# Starts all Docker services in detached mode
+```
+
+```bash Stop Services
+make docker-stop
+# Stops all running Docker services
+```
+
+```bash View Logs
+make docker-logs
+# Shows logs from all services
+```
+
+```bash View Frontend Logs
+make docker-logs-frontend
+# Shows only frontend logs
+```
+
+```bash View Gateway Logs
+make docker-logs-gateway
+# Shows only gateway logs
+```
+</CodeGroup>
+
+### Direct Docker Compose Commands
+
+You can also use Docker Compose directly for more control:
+
+```bash
+# Start services in foreground (see live logs)
+docker-compose -f docker/docker-compose-dev.yaml up
+
+# Rebuild specific service
+docker-compose -f docker/docker-compose-dev.yaml up --build gateway
+
+# View logs for specific service
+docker-compose -f docker/docker-compose-dev.yaml logs -f langgraph
+
+# Execute command in running container
+docker-compose -f docker/docker-compose-dev.yaml exec gateway bash
+
+# Stop and remove all containers
+docker-compose -f docker/docker-compose-dev.yaml down
+```
+
+## Sandbox Modes
+
+The Docker environment supports multiple sandbox execution modes, automatically detected from your `config.yaml`:
+
+<Tabs>
+  <Tab title="Local Sandbox">
+    Runs sandbox code directly on the host machine.
+    
+    ```yaml config.yaml
+    sandbox:
+      use: src.sandbox.local:LocalSandboxProvider
+    ```
+    
+    **Docker services started:**
+    - nginx, frontend, gateway, langgraph
+  </Tab>
+  
+  <Tab title="Docker Sandbox">
+    Runs sandbox code in isolated Docker containers.
+    
+    ```yaml config.yaml
+    sandbox:
+      use: src.community.aio_sandbox:AioSandboxProvider
+    ```
+    
+    **Docker services started:**
+    - nginx, frontend, gateway, langgraph
+  </Tab>
+  
+  <Tab title="Provisioner/Kubernetes Sandbox">
+    Runs sandbox code in Kubernetes pods via provisioner service.
+    
+    ```yaml config.yaml
+    sandbox:
+      use: src.community.aio_sandbox:AioSandboxProvider
+      provisioner_url: http://provisioner:8002
+    ```
+    
+    **Docker services started:**
+    - nginx, frontend, gateway, langgraph, **provisioner**
+    
+    <Warning>
+      Requires a local Kubernetes cluster (Docker Desktop K8s, OrbStack, or k3s).
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Development Workflow
+
+### Making Code Changes
+
+All services have hot-reload enabled:
+
+<Steps>
+  <Step title="Edit Code">
+    Make changes to source files:
+    - Frontend: `frontend/src/**`
+    - Backend: `backend/src/**`
+    - Config: `config.yaml`
+  </Step>
+  
+  <Step title="See Changes Automatically">
+    - **Frontend**: Browser refreshes automatically
+    - **Backend**: Services restart automatically
+    - **Config**: Restart services with `make docker-stop && make docker-start`
+  </Step>
+</Steps>
+
+### Volume Mounts
+
+These directories are mounted from your host to containers for live editing:
+
+```yaml
+Mounted Directories:
+  - frontend/src → /app/frontend/src
+  - backend/src → /app/backend/src
+  - config.yaml → /app/config.yaml
+  - skills/ → /app/skills/
+  - .env → /app/.env
+  - backend/.deer-flow → /app/backend/.deer-flow (persistent data)
+```
+
+### Dependency Caching
+
+To speed up builds, these caches are mounted:
+
+```yaml
+Cache Mounts:
+  - ~/.local/share/pnpm/store → /root/.local/share/pnpm/store (pnpm)
+  - ~/.cache/uv → /root/.cache/uv (Python uv)
+```
+
+## Provisioner Setup (Advanced)
+
+For Kubernetes-based sandbox isolation:
+
+<Steps>
+  <Step title="Set Up Kubernetes">
+    Enable Kubernetes in Docker Desktop or install k3s/OrbStack.
+  </Step>
+  
+  <Step title="Configure Environment">
+    Set required environment variables:
+    
+    ```bash
+    export DEER_FLOW_ROOT=$(pwd)
+    ```
+  </Step>
+  
+  <Step title="Update config.yaml">
+    Enable provisioner mode:
+    
+    ```yaml config.yaml
+    sandbox:
+      use: src.community.aio_sandbox:AioSandboxProvider
+      provisioner_url: http://provisioner:8002
+    ```
+  </Step>
+  
+  <Step title="Start Services">
+    ```bash
+    make docker-start
+    ```
+    
+    The provisioner service will start automatically.
+  </Step>
+</Steps>
+
+See [docker/provisioner/README.md](https://github.com/bytedance/deer-flow/tree/main/docker/provisioner) for detailed configuration.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Containers fail to start">
+    Check Docker is running:
+    ```bash
+    docker ps
+    ```
+    
+    View detailed logs:
+    ```bash
+    make docker-logs
+    ```
+    
+    Rebuild from scratch:
+    ```bash
+    make docker-stop
+    docker-compose -f docker/docker-compose-dev.yaml down -v
+    make docker-init
+    make docker-start
+    ```
+  </Accordion>
+  
+  <Accordion title="Port already in use">
+    Stop existing services:
+    ```bash
+    make docker-stop
+    ```
+    
+    Or find and stop the conflicting process:
+    ```bash
+    lsof -ti:2026 | xargs kill -9
+    ```
+  </Accordion>
+  
+  <Accordion title="Changes not reflected">
+    Ensure volumes are mounted correctly:
+    ```bash
+    docker-compose -f docker/docker-compose-dev.yaml config
+    ```
+    
+    Force restart:
+    ```bash
+    make docker-stop
+    make docker-start
+    ```
+  </Accordion>
+  
+  <Accordion title="Out of disk space">
+    Clean up Docker resources:
+    ```bash
+    # Remove stopped containers
+    docker container prune
+    
+    # Remove unused images
+    docker image prune -a
+    
+    # Remove all unused data
+    docker system prune -a --volumes
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Local Development" icon="code" href="/guides/local-development">
+    Learn about running services without Docker
+  </Card>
+  
+  <Card title="Configuration" icon="gear" href="/configuration/overview">
+    Configure models, tools, and sandbox settings
+  </Card>
+  
+  <Card title="Creating Skills" icon="wand-magic-sparkles" href="/guides/creating-skills">
+    Extend DeerFlow with custom skills
+  </Card>
+  
+  <Card title="File Uploads" icon="file-arrow-up" href="/guides/file-uploads">
+    Upload and process files in conversations
+  </Card>
+</CardGroup>

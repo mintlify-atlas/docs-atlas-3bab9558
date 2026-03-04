@@ -1,0 +1,408 @@
+---
+title: Skills
+description: Extensible capability modules with progressive loading
+---
+
+Skills are structured capability modules that extend the agent's knowledge and workflows. They're loaded progressively — only when needed — keeping the context window lean.
+
+## What are Skills?
+
+A skill is a directory containing:
+- `SKILL.md` - Main skill file with YAML frontmatter and Markdown body
+- `scripts/` - Executable code (optional)
+- `references/` - Documentation files (optional)
+- `assets/` - Templates and files (optional)
+
+**Example Structure**:
+```
+skills/custom/data-analysis/
+├── SKILL.md              # Main skill definition
+├── scripts/
+│   └── analyze.py      # Analysis script
+├── references/
+│   └── sql_schema.md   # Database schema
+└── assets/
+    └── template.html   # Report template
+```
+
+## Skill Format
+
+Skills use YAML frontmatter for metadata and Markdown for instructions:
+
+```markdown
+---
+name: data-analysis
+description: Analyze datasets with pandas, create visualizations, and generate reports. Use when working with CSV/Excel files, statistical analysis, or data visualization tasks.
+license: MIT
+allowed-tools:
+  - bash
+  - read_file
+  - write_file
+---
+
+# Data Analysis Skill
+
+## Overview
+This skill provides comprehensive data analysis capabilities...
+
+## Quick Start
+Load a CSV file:
+```python
+import pandas as pd
+df = pd.read_csv('/mnt/user-data/uploads/data.csv')
+print(df.describe())
+```
+
+## Visualizations
+...
+```
+
+### Frontmatter Fields
+
+<ParamField path="name" type="string" required>
+  Unique skill identifier (kebab-case)
+</ParamField>
+
+<ParamField path="description" type="string" required>
+  When to use this skill. Include specific triggers and use cases.
+</ParamField>
+
+<ParamField path="license" type="string">
+  License for the skill (e.g., MIT, Apache-2.0)
+</ParamField>
+
+<ParamField path="allowed-tools" type="array">
+  Tools the skill is allowed to use. Leave empty for all tools.
+</ParamField>
+
+## Progressive Loading
+
+Skills are loaded in two stages:
+
+### Stage 1: Skill List (Always Loaded)
+
+The agent receives a list of available skills with their descriptions:
+
+```
+Available Skills:
+1. deep-research: Comprehensive multi-source research with citations
+2. data-analysis: Analyze datasets and create visualizations
+3. web-design: Create responsive HTML/CSS websites
+```
+
+This helps the agent decide which skill to load.
+
+### Stage 2: Full Skill Content (On-Demand)
+
+When the agent decides to use a skill, it loads the full `SKILL.md` content:
+
+```python
+# Agent decision
+"I need to analyze this CSV file. Let me load the data-analysis skill."
+
+# System loads SKILL.md content
+full_skill = load_skill("data-analysis")
+
+# Agent now has detailed instructions
+"Now I know how to use pandas for this analysis..."
+```
+
+<Info>
+  Progressive loading keeps the initial prompt small while providing deep knowledge when needed.
+</Info>
+
+## Built-in Skills
+
+DeerFlow ships with several public skills:
+
+<CardGroup cols={2}>
+  <Card title="Deep Research" icon="magnifying-glass">
+    Multi-source research with web search, citations, and structured output
+  </Card>
+  <Card title="GitHub Research" icon="github">
+    Repository analysis, issue tracking, and codebase understanding
+  </Card>
+  <Card title="Data Analysis" icon="chart-line">
+    Dataset analysis with pandas, visualizations, and statistical reports
+  </Card>
+  <Card title="PPT Generation" icon="presentation">
+    PowerPoint presentation creation with themes and layouts
+  </Card>
+  <Card title="Podcast Generation" icon="podcast">
+    Audio podcast creation with scripts and TTS
+  </Card>
+  <Card title="Image Generation" icon="image">
+    AI image generation with DALL-E or Stable Diffusion
+  </Card>
+  <Card title="Video Generation" icon="video">
+    Video creation from scripts and images
+  </Card>
+  <Card title="Web Design" icon="browser">
+    Responsive website creation with HTML/CSS/JS
+  </Card>
+</CardGroup>
+
+## Skill Categories
+
+### Public Skills
+
+**Location**: `skills/public/`
+
+**Characteristics**:
+- Shipped with DeerFlow
+- Version controlled in Git
+- Community maintained
+
+### Custom Skills
+
+**Location**: `skills/custom/`
+
+**Characteristics**:
+- User-created or installed
+- Gitignored by default
+- Organization-specific
+
+## Installing Skills
+
+Skills can be installed via:
+
+### Method 1: API Upload
+
+```bash
+curl -X POST http://localhost:8001/api/skills/install \
+  -F "file=@my-skill.skill"
+```
+
+### Method 2: Manual Copy
+
+```bash
+cp -r my-skill skills/custom/
+```
+
+### Method 3: Skill Archive (.skill file)
+
+Create a `.skill` archive:
+
+```bash
+cd skills/custom/my-skill
+zip -r ../my-skill.skill .
+```
+
+Install via Gateway API or Frontend.
+
+<Card title="Creating Custom Skills" icon="puzzle-piece" href="/guides/creating-skills">
+  Learn how to create your own skills
+</Card>
+
+## Enabling/Disabling Skills
+
+Skills can be toggled via:
+
+### API
+
+```bash
+curl -X PUT http://localhost:8001/api/skills/data-analysis \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": false}'
+```
+
+### Python Client
+
+```python
+from src.client import DeerFlowClient
+
+client = DeerFlowClient()
+client.update_skill("data-analysis", enabled=False)
+```
+
+### Configuration File
+
+```json extensions_config.json
+{
+  "skills": {
+    "data-analysis": {"enabled": true},
+    "deep-research": {"enabled": false}
+  }
+}
+```
+
+## Skill Discovery
+
+The system discovers skills by scanning directories:
+
+```python
+def load_skills() -> list[Skill]:
+    skills = []
+    
+    # Scan public and custom directories
+    for base_dir in ["skills/public", "skills/custom"]:
+        for skill_dir in os.listdir(base_dir):
+            skill_md = f"{base_dir}/{skill_dir}/SKILL.md"
+            
+            if os.path.exists(skill_md):
+                # Parse frontmatter and body
+                skill = parse_skill(skill_md)
+                
+                # Check enabled status
+                skill.enabled = get_enabled_status(skill.name)
+                
+                skills.append(skill)
+    
+    return skills
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Write clear descriptions">
+    The description determines when your skill is loaded. Be specific:
+    
+    ✅ **Good**: "Analyze datasets with pandas, create visualizations, and generate statistical reports. Use when working with CSV/Excel files."
+    
+    ❌ **Bad**: "Data analysis skill"
+  </Accordion>
+  
+  <Accordion title="Keep SKILL.md under 500 lines">
+    Long skills slow down the agent. Split content into reference files:
+    
+    ```markdown SKILL.md
+    # BigQuery Skill
+    
+    ## Quick Start
+    Basic usage...
+    
+    ## Advanced
+    - Finance queries: See references/finance.md
+    - Sales queries: See references/sales.md
+    ```
+  </Accordion>
+  
+  <Accordion title="Include real examples">
+    Show actual code that works in the sandbox:
+    
+    ```python
+    import pandas as pd
+    df = pd.read_csv('/mnt/user-data/uploads/data.csv')
+    print(df.describe())
+    ```
+  </Accordion>
+  
+  <Accordion title="Specify allowed tools">
+    Limit tools to what the skill needs:
+    
+    ```yaml
+    allowed-tools:
+      - bash
+      - read_file
+      - write_file
+      - present_files
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Bundled Resources
+
+Skills can include supporting files:
+
+### Scripts
+
+**Location**: `scripts/`
+
+**Purpose**: Executable code for deterministic tasks
+
+**Example**:
+```python scripts/analyze.py
+import pandas as pd
+import sys
+
+def analyze_dataset(filepath):
+    df = pd.read_csv(filepath)
+    return df.describe().to_dict()
+
+if __name__ == "__main__":
+    result = analyze_dataset(sys.argv[1])
+    print(result)
+```
+
+**Usage in SKILL.md**:
+```markdown
+Run the analysis script:
+```bash
+python /mnt/skills/custom/data-analysis/scripts/analyze.py data.csv
+```
+```
+
+### References
+
+**Location**: `references/`
+
+**Purpose**: Documentation loaded on-demand
+
+**Example**:
+```markdown references/sql_schema.md
+# Database Schema
+
+## Users Table
+- id: INTEGER PRIMARY KEY
+- name: TEXT
+- email: TEXT UNIQUE
+```
+
+**Usage in SKILL.md**:
+```markdown
+For database schema details, see [sql_schema.md](references/sql_schema.md)
+```
+
+### Assets
+
+**Location**: `assets/`
+
+**Purpose**: Templates and files used in output
+
+**Example**:
+```html assets/report-template.html
+<!DOCTYPE html>
+<html>
+<head><title>Analysis Report</title></head>
+<body>
+    <h1>{{title}}</h1>
+    <div>{{content}}</div>
+</body>
+</html>
+```
+
+## Container Paths
+
+Inside the sandbox, skills are mounted at:
+
+```
+/mnt/skills/
+├── public/
+│   ├── deep-research/
+│   └── data-analysis/
+└── custom/
+    └── my-skill/
+```
+
+Reference skill resources with these paths:
+
+```bash
+python /mnt/skills/custom/my-skill/scripts/process.py
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Create Custom Skills" icon="code" href="/guides/creating-skills">
+    Build your own skill modules
+  </Card>
+  <Card title="Skills API" icon="server" href="/api/gateway/skills">
+    Manage skills via API
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/skills-and-mcp">
+    Configure skills and MCP
+  </Card>
+  <Card title="Tools" icon="wrench" href="/concepts/tools">
+    Learn about available tools
+  </Card>
+</CardGroup>

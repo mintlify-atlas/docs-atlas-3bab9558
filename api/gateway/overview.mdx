@@ -1,0 +1,139 @@
+---
+title: 'Gateway API Overview'
+description: 'Introduction to the DeerFlow Gateway API, authentication, and common patterns'
+---
+
+## Introduction
+
+The DeerFlow Gateway API provides RESTful endpoints for managing models, skills, MCP servers, memory, file uploads, and artifacts. It runs as a separate FastAPI service alongside the LangGraph Server.
+
+## Base URL
+
+The API Gateway runs on port `8001` by default:
+
+```
+http://localhost:8001
+```
+
+All API endpoints are prefixed with `/api`:
+
+```
+http://localhost:8001/api/models
+http://localhost:8001/api/skills
+http://localhost:8001/api/memory
+```
+
+## Architecture
+
+The Gateway API is built with FastAPI and provides:
+
+- **Models Management**: Query available AI models and their capabilities
+- **Skills Management**: List, enable/disable, and install custom skills
+- **MCP Configuration**: Manage Model Context Protocol server configurations
+- **Memory Management**: Access and reload global memory data
+- **File Uploads**: Upload files to thread-specific directories
+- **Artifacts**: Access and download thread-generated files
+
+LangGraph requests are handled by nginx reverse proxy, while the Gateway provides custom endpoints for configuration and file management.
+
+## Authentication
+
+The Gateway API currently does not require authentication for local development. CORS is handled by nginx in production deployments.
+
+**CORS Origins**: Configurable via `CORS_ORIGINS` environment variable (default: `http://localhost:3000`)
+
+## Configuration
+
+The Gateway can be configured using environment variables:
+
+<ParamField path="GATEWAY_HOST" type="string" default="0.0.0.0">
+  Host to bind the gateway server
+</ParamField>
+
+<ParamField path="GATEWAY_PORT" type="integer" default="8001">
+  Port to bind the gateway server
+</ParamField>
+
+<ParamField path="CORS_ORIGINS" type="string" default="http://localhost:3000">
+  Comma-separated list of allowed CORS origins
+</ParamField>
+
+## Error Handling
+
+The API uses standard HTTP status codes:
+
+<ResponseField name="200" type="OK">
+  Request succeeded
+</ResponseField>
+
+<ResponseField name="400" type="Bad Request">
+  Invalid request parameters or malformed data
+</ResponseField>
+
+<ResponseField name="403" type="Forbidden">
+  Access denied (e.g., path traversal attempt)
+</ResponseField>
+
+<ResponseField name="404" type="Not Found">
+  Resource not found
+</ResponseField>
+
+<ResponseField name="409" type="Conflict">
+  Resource already exists (e.g., duplicate skill)
+</ResponseField>
+
+<ResponseField name="500" type="Internal Server Error">
+  Server error
+</ResponseField>
+
+### Error Response Format
+
+Error responses follow this format:
+
+```json
+{
+  "detail": "Error message describing what went wrong"
+}
+```
+
+## Interactive Documentation
+
+The Gateway API provides interactive documentation:
+
+- **Swagger UI**: `http://localhost:8001/docs`
+- **ReDoc**: `http://localhost:8001/redoc`
+- **OpenAPI Schema**: `http://localhost:8001/openapi.json`
+
+## Health Check
+
+Check the Gateway service health:
+
+```bash
+curl http://localhost:8001/health
+```
+
+Response:
+
+```json
+{
+  "status": "healthy",
+  "service": "deer-flow-gateway"
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Models API" icon="brain" href="/api/gateway/models">
+    Query available AI models
+  </Card>
+  <Card title="Skills API" icon="puzzle-piece" href="/api/gateway/skills">
+    Manage skills and extensions
+  </Card>
+  <Card title="MCP API" icon="plug" href="/api/gateway/mcp">
+    Configure MCP servers
+  </Card>
+  <Card title="Memory API" icon="database" href="/api/gateway/memory">
+    Access global memory
+  </Card>
+</CardGroup>

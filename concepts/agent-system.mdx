@@ -1,0 +1,296 @@
+---
+title: Agent System
+description: Lead agent, ThreadState, and middleware chain
+---
+
+DeerFlow's agent system is built on LangGraph, providing a powerful framework for orchestrating AI agents with tools, memory, and sub-agents.
+
+## Lead Agent
+
+The lead agent is the entry point for all user interactions. It's implemented in `backend/src/agents/lead_agent/agent.py`.
+
+**Key Components**:
+- Dynamic model selection
+- Tool loading and management
+- System prompt generation
+- Middleware chain execution
+
+### Agent Creation
+
+The agent is created via the `make_lead_agent()` function, registered in `langgraph.json`:
+
+```python
+def make_lead_agent(config: RunnableConfig):
+    # Get configuration
+    thinking_enabled = config.get("configurable", {}).get("thinking_enabled", False)
+    model_name = config.get("configurable", {}).get("model_name")
+    
+    # Create model
+    model = create_chat_model(model_name, thinking_enabled)
+    
+    # Load tools
+    tools = get_available_tools(
+        groups=config.tool_groups,
+        model_name=model_name,
+        subagent_enabled=config.subagent_enabled
+    )
+    
+    # Generate system prompt
+    system_prompt = apply_prompt_template(config)
+    
+    # Build agent
+    agent = create_react_agent(model, tools, state_schema=ThreadState)
+    
+    return agent
+```
+
+### Runtime Configuration
+
+The agent behavior can be customized per-request via `config.configurable`:
+
+<ParamField path="thinking_enabled" type="boolean" default="false">
+  Enable extended thinking mode for complex reasoning
+</ParamField>
+
+<ParamField path="model_name" type="string">
+  Override the default model for this request
+</ParamField>
+
+<ParamField path="is_plan_mode" type="boolean" default="false">
+  Enable TodoList middleware for task tracking
+</ParamField>
+
+<ParamField path="subagent_enabled" type="boolean" default="true">
+  Enable sub-agent delegation tool
+</ParamField>
+
+## ThreadState
+
+ThreadState extends LangGraph's `AgentState` with DeerFlow-specific fields.
+
+**Location**: `backend/src/agents/thread_state.py`
+
+```python
+class ThreadState(AgentState):
+    messages: Annotated[list, add_messages]
+    sandbox: Optional[Sandbox]
+    thread_data: dict
+    title: Optional[str]
+    artifacts: Annotated[list[dict], merge_artifacts]
+    todos: Optional[list[dict]]
+    uploaded_files: list[str]
+    viewed_images: Annotated[list[dict], merge_viewed_images]
+```
+
+### State Fields
+
+<AccordionGroup>
+  <Accordion title="messages">
+    Conversation history with custom `add_messages` reducer.
+    
+    **Type**: `list[BaseMessage]`
+    
+    Includes HumanMessage, AIMessage, ToolMessage, and SystemMessage types.
+  </Accordion>
+  
+  <Accordion title="sandbox">
+    Sandbox instance for file operations and command execution.
+    
+    **Type**: `Optional[Sandbox]`
+    
+    Set by SandboxMiddleware, used by sandbox tools.
+  </Accordion>
+  
+  <Accordion title="thread_data">
+    Thread-specific metadata and configuration.
+    
+    **Type**: `dict`
+    
+    ```python
+    {
+        "thread_id": "abc123",
+        "workspace_path": "/path/to/workspace",
+        "uploads_path": "/path/to/uploads",
+        "outputs_path": "/path/to/outputs"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="artifacts">
+    Output files created by the agent.
+    
+    **Type**: `list[dict]`
+    
+    **Reducer**: `merge_artifacts` (deduplicates by path)
+    
+    ```python
+    [
+        {
+            "path": "/mnt/user-data/outputs/report.html",
+            "type": "html",
+            "title": "Analysis Report"
+        }
+    ]
+    ```
+  </Accordion>
+  
+  <Accordion title="todos">
+    Task list for Plan Mode.
+    
+    **Type**: `Optional[list[dict]]`
+    
+    Only populated when `is_plan_mode=true`.
+  </Accordion>
+  
+  <Accordion title="uploaded_files">
+    List of files uploaded by the user.
+    
+    **Type**: `list[str]`
+    
+    File paths in the uploads directory.
+  </Accordion>
+  
+  <Accordion title="viewed_images">
+    Images loaded for vision-enabled models.
+    
+    **Type**: `list[dict]`
+    
+    **Reducer**: `merge_viewed_images` (supports clearing)
+  </Accordion>
+</AccordionGroup>
+
+### Custom Reducers
+
+**merge_artifacts**: Deduplicates artifacts by path
+```python
+def merge_artifacts(left: list, right: list) -> list:
+    seen = {a["path"] for a in left}
+    return left + [a for a in right if a["path"] not in seen]
+```
+
+**merge_viewed_images**: Merges images, supports clearing
+```python
+def merge_viewed_images(left: list, right: list | str) -> list:
+    if right == "clear":
+        return []
+    return left + right
+```
+
+## Middleware Chain
+
+Middlewares execute in strict order around the agent:
+
+1. **ThreadDataMiddleware** - Creates thread directories
+2. **UploadsMiddleware** - Injects uploaded files into conversation
+3. **SandboxMiddleware** - Acquires and stores sandbox instance
+4. **DanglingToolCallMiddleware** - Handles interrupted tool calls
+5. **SummarizationMiddleware** - Context reduction (optional)
+6. **TodoListMiddleware** - Task tracking (optional, Plan Mode)
+7. **TitleMiddleware** - Auto-generates thread title
+8. **MemoryMiddleware** - Queues conversations for memory updates
+9. **ViewImageMiddleware** - Injects image data for vision models
+10. **SubagentLimitMiddleware** - Enforces concurrent subagent limits
+11. **ClarificationMiddleware** - Handles ask_clarification interrupts (must be last)
+
+<Card title="Middleware Chain" icon="layer-group" href="/advanced/middleware-chain">
+  Learn about each middleware in detail
+</Card>
+
+## System Prompt
+
+The agent's system prompt is dynamically generated with:
+
+- **Skills**: Enabled skills with their descriptions
+- **Memory**: Top 15 facts and user context
+- **Sub-agents**: Available sub-agent types
+- **Tools**: Tool usage guidelines
+- **Sandbox paths**: Virtual filesystem structure
+
+**Example**:
+```
+You are a super agent with access to skills, tools, and sub-agents.
+
+Skills:
+- deep-research: Comprehensive research with multi-source analysis
+- data-analysis: Analyze datasets with pandas and create visualizations
+
+Memory:
+User Context:
+- Work: Software engineer at TechCorp
+- Preferences: Prefers Python over JavaScript
+
+Key Facts:
+- Uses VS Code as primary editor (confidence: 0.9)
+- Works on microservices architecture (confidence: 0.85)
+
+Tools:
+- bash: Execute commands in sandbox
+- read_file: Read file contents
+- task: Delegate to sub-agents
+
+Sandbox:
+- /mnt/user-data/workspace - Your working directory
+- /mnt/user-data/uploads - User uploaded files
+- /mnt/user-data/outputs - Output files for the user
+- /mnt/skills/public - Public skills
+- /mnt/skills/custom - Custom skills
+```
+
+## Tool Loading
+
+Tools are loaded via `get_available_tools()`:
+
+```python
+tools = get_available_tools(
+    groups=["sandbox", "research"],  # Tool groups from config
+    include_mcp=True,                # Include MCP tools
+    model_name="gpt-4",             # Current model
+    subagent_enabled=True           # Include task() tool
+)
+```
+
+**Tool Sources**:
+1. **Config-defined tools**: From `config.yaml` via reflection
+2. **MCP tools**: From enabled MCP servers
+3. **Built-in tools**: `present_files`, `ask_clarification`, `view_image`
+4. **Sub-agent tool**: `task()` for delegation
+
+## Model Selection
+
+Models are created via the model factory:
+
+```python
+from src.models.factory import create_chat_model
+
+model = create_chat_model(
+    name="gpt-4",
+    thinking_enabled=True
+)
+```
+
+The factory:
+- Resolves model configuration from `config.yaml`
+- Instantiates via reflection system
+- Applies thinking mode overrides
+- Handles environment variable resolution
+
+<Card title="Model Factory" icon="industry" href="/advanced/model-factory">
+  Deep dive into model instantiation
+</Card>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Middleware Chain" icon="layer-group" href="/advanced/middleware-chain">
+    Understand each middleware component
+  </Card>
+  <Card title="ThreadState" icon="database" href="/advanced/thread-state">
+    Deep dive into state management
+  </Card>
+  <Card title="Tools" icon="wrench" href="/concepts/tools">
+    Learn about available tools
+  </Card>
+  <Card title="Sub-agents" icon="users" href="/concepts/sub-agents">
+    Delegate tasks to sub-agents
+  </Card>
+</CardGroup>

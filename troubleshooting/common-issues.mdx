@@ -1,0 +1,489 @@
+---
+title: Common Issues
+description: Solutions to frequently encountered installation, configuration, and setup problems
+---
+
+## Installation Problems
+
+<Accordion title="Command not found: make, pnpm, uv, or nginx">
+  **Problem**: Missing required dependencies when running `make check` or `make dev`.
+
+  **Solution**:
+
+  **macOS**:
+  ```bash
+  # Install Homebrew if not already installed
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+  # Install required tools
+  brew install pnpm nginx
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+
+  # Verify Node.js version (requires 22+)
+  node --version
+  # If Node version is below 22, install the latest:
+  brew install node@22
+  ```
+
+  **Linux (Ubuntu/Debian)**:
+  ```bash
+  # Install Node.js 22+ via NodeSource
+  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+  sudo apt-get install -y nodejs
+
+  # Install pnpm
+  npm install -g pnpm
+
+  # Install uv
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+
+  # Install nginx
+  sudo apt-get install -y nginx
+  ```
+
+  **Windows**:
+  ```powershell
+  # Use Scoop package manager
+  scoop install nodejs-lts pnpm nginx
+  
+  # Install uv
+  powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+  ```
+</Accordion>
+
+<Accordion title="Python version mismatch or module not found errors">
+  **Problem**: Errors like `ModuleNotFoundError` or `Python 3.12+ required`.
+
+  **Solution**:
+
+  DeerFlow requires Python 3.12 or higher. Install using `uv`:
+
+  ```bash
+  # From the backend directory
+  cd backend
+
+  # Let uv handle Python installation and dependencies
+  uv sync
+
+  # Verify Python version
+  uv run python --version
+  # Should output: Python 3.12.x or higher
+  ```
+
+  If you still encounter issues:
+  ```bash
+  # Remove existing virtual environment
+  rm -rf .venv
+
+  # Reinstall
+  uv sync
+  ```
+</Accordion>
+
+<Accordion title="Docker Desktop not running or Docker daemon not accessible">
+  **Problem**: `Cannot connect to the Docker daemon` when using Docker sandbox mode.
+
+  **Solution**:
+
+  1. **Start Docker Desktop**:
+     - macOS/Windows: Launch Docker Desktop application
+     - Verify it's running: Look for Docker icon in system tray
+
+  2. **Check Docker daemon**:
+     ```bash
+     docker ps
+     # Should list running containers (or empty list if none running)
+     ```
+
+  3. **Restart Docker service (Linux)**:
+     ```bash
+     sudo systemctl start docker
+     sudo systemctl enable docker
+     ```
+
+  4. **Add user to docker group (Linux)**:
+     ```bash
+     sudo usermod -aG docker $USER
+     # Log out and back in for changes to take effect
+     ```
+</Accordion>
+
+## Configuration Errors
+
+<Accordion title="Config file not found">
+  **Problem**: `Configuration file not found` error when starting services.
+
+  **Solution**:
+
+  The configuration file must be in the **project root directory**, not the backend directory.
+
+  1. **Create config from example**:
+     ```bash
+     # From project root (deer-flow/)
+     cd deer-flow
+     cp config.example.yaml config.yaml
+     ```
+
+  2. **Verify location**:
+     ```bash
+     # Should be in project root
+     ls -la config.yaml
+     # Output: -rw-r--r--  1 user  staff  10234 Mar 04 10:00 config.yaml
+     ```
+
+  3. **Alternative: Set environment variable**:
+     ```bash
+     export DEER_FLOW_CONFIG_PATH="/absolute/path/to/config.yaml"
+     ```
+
+  **Configuration file search order**:
+  1. `DEER_FLOW_CONFIG_PATH` environment variable
+  2. `backend/config.yaml` (current directory)
+  3. `deer-flow/config.yaml` (parent directory - **recommended**)
+</Accordion>
+
+<Accordion title="Invalid API key or authentication failed">
+  **Problem**: `Invalid API key` or `Authentication failed` errors when making LLM requests.
+
+  **Solution**:
+
+  1. **Verify environment variables are set**:
+     ```bash
+     echo $OPENAI_API_KEY
+     echo $ANTHROPIC_API_KEY
+     # Should output your API key, not empty
+     ```
+
+  2. **Check config.yaml uses environment variable syntax**:
+     ```yaml
+     models:
+       - name: gpt-4
+         api_key: $OPENAI_API_KEY  # Correct: $ prefix
+         # NOT: api_key: your-key-here  # Wrong: hardcoded
+     ```
+
+  3. **Set environment variables properly**:
+     ```bash
+     # Option A: Add to .env file in project root
+     echo "OPENAI_API_KEY=sk-..." >> .env
+
+     # Option B: Export in shell
+     export OPENAI_API_KEY="sk-..."
+
+     # Option C: Add to shell profile (~/.bashrc, ~/.zshrc)
+     echo 'export OPENAI_API_KEY="sk-..."' >> ~/.zshrc
+     source ~/.zshrc
+     ```
+
+  4. **Restart services after setting variables**:
+     ```bash
+     make stop
+     make dev
+     ```
+
+  5. **Test API key directly**:
+     ```bash
+     # OpenAI
+     curl https://api.openai.com/v1/models \
+       -H "Authorization: Bearer $OPENAI_API_KEY"
+
+     # Anthropic
+     curl https://api.anthropic.com/v1/messages \
+       -H "x-api-key: $ANTHROPIC_API_KEY" \
+       -H "anthropic-version: 2023-06-01" \
+       -H "content-type: application/json" \
+       -d '{"model":"claude-3-5-sonnet-20241022","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}'
+     ```
+</Accordion>
+
+<Accordion title="Extensions config not found or MCP servers failing to load">
+  **Problem**: `extensions_config.json not found` or MCP servers not working.
+
+  **Solution**:
+
+  1. **Create extensions config from example**:
+     ```bash
+     # From project root
+     cp extensions_config.example.json extensions_config.json
+     ```
+
+  2. **Verify MCP server configuration**:
+     ```json
+     {
+       "mcpServers": {
+         "filesystem": {
+           "enabled": true,  // Must be true
+           "type": "stdio",
+           "command": "npx",
+           "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"]
+         }
+       }
+     }
+     ```
+
+  3. **Check environment variables in MCP config**:
+     ```json
+     {
+       "mcpServers": {
+         "github": {
+           "enabled": true,
+           "env": {
+             "GITHUB_TOKEN": "$GITHUB_TOKEN"  // Must start with $
+           }
+         }
+       }
+     }
+     ```
+
+  4. **Validate JSON syntax**:
+     ```bash
+     # Use jq to validate JSON
+     jq . extensions_config.json
+     # Should output formatted JSON, not errors
+     ```
+
+  5. **Restart to reload config**:
+     ```bash
+     make stop
+     make dev
+     ```
+</Accordion>
+
+<Accordion title="Model not found or unsupported provider">
+  **Problem**: `Model 'xxx' not found` or `Failed to import provider`.
+
+  **Solution**:
+
+  1. **Install required provider package**:
+
+     DeerFlow supports any LangChain-compatible provider. Install the appropriate package:
+
+     ```bash
+     # From backend directory
+     cd backend
+
+     # OpenAI
+     uv add langchain-openai
+
+     # Anthropic
+     uv add langchain-anthropic
+
+     # Google (Gemini)
+     uv add langchain-google-genai
+
+     # DeepSeek
+     uv add langchain-deepseek
+
+     # Other providers
+     uv add langchain-<provider-name>
+     ```
+
+  2. **Verify model configuration in config.yaml**:
+     ```yaml
+     models:
+       - name: gpt-4
+         display_name: GPT-4
+         use: langchain_openai:ChatOpenAI  # Must match installed package
+         model: gpt-4  # Must be valid model ID for the provider
+     ```
+
+  3. **Check for typos in provider path**:
+     - Correct: `langchain_openai:ChatOpenAI` (underscore, not hyphen)
+     - Correct: `langchain_anthropic:ChatAnthropic`
+     - Wrong: `langchain-openai:ChatOpenAI`
+
+  4. **Test model directly**:
+     ```bash
+     cd backend
+     uv run python -c "from langchain_openai import ChatOpenAI; print('OK')"
+     ```
+</Accordion>
+
+## Dependency Issues
+
+<Accordion title="Port already in use (2024, 8001, 3000, 2026)">
+  **Problem**: `Address already in use` when starting services.
+
+  **Solution**:
+
+  DeerFlow uses multiple ports:
+  - **2024**: LangGraph Server
+  - **8001**: Gateway API
+  - **3000**: Frontend
+  - **2026**: Nginx (unified entry point)
+  - **8002**: Provisioner (optional, only in Kubernetes mode)
+  - **8080+**: Sandbox containers (dynamic)
+
+  1. **Find process using the port**:
+     ```bash
+     # macOS/Linux
+     lsof -i :2026
+     lsof -i :2024
+
+     # Windows
+     netstat -ano | findstr :2026
+     ```
+
+  2. **Kill the conflicting process**:
+     ```bash
+     # macOS/Linux
+     kill -9 <PID>
+
+     # Windows
+     taskkill /PID <PID> /F
+     ```
+
+  3. **Stop DeerFlow services properly**:
+     ```bash
+     make stop
+     ```
+
+  4. **Change port (advanced)**:
+     
+     Edit service configurations if you need different ports:
+     - LangGraph: `backend/langgraph.json`
+     - Gateway: `backend/src/gateway/app.py`
+     - Frontend: `frontend/package.json` (dev script)
+     - Nginx: `nginx.conf`
+</Accordion>
+
+<Accordion title="npm or pnpm install failures">
+  **Problem**: Frontend dependencies fail to install with errors like `EACCES` or `ERESOLVE`.
+
+  **Solution**:
+
+  1. **Use pnpm instead of npm**:
+     ```bash
+     # Install pnpm if not already installed
+     npm install -g pnpm
+
+     # From project root
+     make install
+     ```
+
+  2. **Clear cache and reinstall**:
+     ```bash
+     # From frontend directory
+     cd frontend
+     rm -rf node_modules pnpm-lock.yaml
+     pnpm install
+     ```
+
+  3. **Fix permissions (macOS/Linux)**:
+     ```bash
+     sudo chown -R $USER:$USER ~/.pnpm-store
+     sudo chown -R $USER:$USER node_modules
+     ```
+
+  4. **Use Node.js 22+**:
+     ```bash
+     node --version
+     # Should be v22.x.x or higher
+     
+     # If not, upgrade:
+     brew install node@22  # macOS
+     # or use nvm:
+     nvm install 22
+     nvm use 22
+     ```
+</Accordion>
+
+## General Troubleshooting
+
+<Accordion title="Services start but frontend shows connection error">
+  **Problem**: Frontend loads but cannot connect to backend services.
+
+  **Solution**:
+
+  1. **Verify all services are running**:
+     ```bash
+     # Check processes
+     ps aux | grep langgraph
+     ps aux | grep uvicorn  # Gateway
+     ps aux | grep next     # Frontend
+     ps aux | grep nginx
+     ```
+
+  2. **Test backend endpoints directly**:
+     ```bash
+     # LangGraph health (through nginx)
+     curl http://localhost:2026/api/langgraph/info
+
+     # Gateway health (through nginx)
+     curl http://localhost:2026/api/models
+
+     # Direct ports (if nginx not working)
+     curl http://localhost:2024/info      # LangGraph
+     curl http://localhost:8001/health    # Gateway
+     ```
+
+  3. **Check nginx configuration**:
+     ```bash
+     # Test nginx config
+     nginx -t
+
+     # View nginx error logs
+     tail -f /usr/local/var/log/nginx/error.log  # macOS
+     tail -f /var/log/nginx/error.log            # Linux
+     ```
+
+  4. **Restart services in order**:
+     ```bash
+     make stop
+     # Wait 5 seconds
+     make dev
+     ```
+
+  5. **Check frontend environment variables**:
+     ```bash
+     # From frontend directory
+     cat .env.local
+     # Should have:
+     # NEXT_PUBLIC_LANGGRAPH_BASE_URL=/api/langgraph
+     # NEXT_PUBLIC_BACKEND_BASE_URL=(empty or not set)
+     ```
+</Accordion>
+
+<Accordion title="Clean reinstall procedure">
+  **Problem**: Multiple issues or corrupted state requiring fresh start.
+
+  **Solution**:
+
+  Perform a complete clean reinstall:
+
+  ```bash
+  # 1. Stop all services
+  make stop
+
+  # 2. Remove all generated files and dependencies
+  cd backend
+  rm -rf .venv .deer-flow
+  
+  cd ../frontend
+  rm -rf node_modules .next pnpm-lock.yaml
+  
+  cd ..
+
+  # 3. Clean Docker resources (if using Docker sandbox)
+  docker system prune -a --volumes -f
+
+  # 4. Reinstall dependencies
+  make install
+
+  # 5. Verify configuration files exist
+  ls -la config.yaml extensions_config.json .env
+
+  # 6. Start services
+  make dev
+
+  # 7. Verify services are running
+  curl http://localhost:2026/api/models
+  ```
+</Accordion>
+
+## Next Steps
+
+- [Sandbox Errors](/troubleshooting/sandbox-errors) - Docker and container issues
+- [Model Configuration](/troubleshooting/model-configuration) - LLM provider problems
+- [Performance Optimization](/troubleshooting/performance) - Speed and resource issues
+- [Configuration Guide](/configuration/config-yaml) - Complete configuration reference

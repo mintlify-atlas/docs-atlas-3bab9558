@@ -1,0 +1,387 @@
+---
+title: Sandbox
+description: Isolated execution environment with filesystem access
+---
+
+The sandbox provides an isolated execution environment where agents can read files, write files, and execute commands safely.
+
+## Overview
+
+DeerFlow's sandbox system supports multiple execution modes:
+
+<CardGroup cols={3}>
+  <Card title="Local" icon="computer">
+    Direct execution on the host filesystem
+  </Card>
+  <Card title="Docker" icon="docker">
+    Isolated containers with AIO Sandbox
+  </Card>
+  <Card title="Kubernetes" icon="dharmachakra">
+    Provisioner-managed pods at scale
+  </Card>
+</CardGroup>
+
+## Sandbox Interface
+
+All sandbox providers implement the abstract `Sandbox` interface:
+
+```python
+class Sandbox(ABC):
+    @abstractmethod
+    async def execute_command(self, command: str) -> dict:
+        """Execute a shell command"""
+        pass
+    
+    @abstractmethod
+    async def read_file(self, path: str) -> str:
+        """Read file contents"""
+        pass
+    
+    @abstractmethod
+    async def write_file(self, path: str, content: str) -> dict:
+        """Write file contents"""
+        pass
+    
+    @abstractmethod
+    async def list_dir(self, path: str) -> list:
+        """List directory contents"""
+        pass
+```
+
+## Virtual Path System
+
+The sandbox uses virtual paths to isolate threads:
+
+**Agent View (Virtual)**:
+```
+/mnt/user-data/
+├── workspace/     # Working directory
+├── uploads/       # User files
+└── outputs/       # Agent outputs
+
+/mnt/skills/
+├── public/        # Built-in skills
+└── custom/        # Custom skills
+```
+
+**Physical Paths**:
+```
+backend/.deer-flow/threads/thread-abc123/user-data/
+├── workspace/
+├── uploads/
+└── outputs/
+
+skills/
+├── public/
+└── custom/
+```
+
+### Path Translation
+
+The sandbox translates between virtual and physical paths:
+
+```python
+def replace_virtual_path(path: str, thread_id: str) -> str:
+    """Translate virtual path to physical path"""
+    if "/mnt/user-data/" in path:
+        base = f"backend/.deer-flow/threads/{thread_id}/user-data"
+        return path.replace("/mnt/user-data", base)
+    
+    if "/mnt/skills/" in path:
+        return path.replace("/mnt/skills", "skills")
+    
+    return path
+```
+
+<Info>
+  Path translation is transparent to the agent. Use virtual paths in prompts and tools.
+</Info>
+
+## Local Sandbox
+
+The local sandbox executes directly on the host machine.
+
+**Configuration** (`config.yaml`):
+```yaml
+sandbox:
+  use: src.sandbox.local:LocalSandboxProvider
+```
+
+**Features**:
+- Fast execution (no container overhead)
+- Direct filesystem access
+- Simple debugging
+
+**Use Cases**:
+- Local development
+- Trusted environments
+- CI/CD pipelines
+
+<Warning>
+  Local sandbox has no isolation. Use only in trusted environments.
+</Warning>
+
+## Docker Sandbox (AIO)
+
+The Docker sandbox runs commands in isolated containers via the [AIO Sandbox](https://github.com/agent-sandbox/aio-sandbox) library.
+
+**Configuration** (`config.yaml`):
+```yaml
+sandbox:
+  use: src.community.aio_sandbox:AioSandboxProvider
+  aio_sandbox:
+    host: unix:///var/run/docker.sock  # Docker daemon
+    image: bytedance/deerflow-sandbox:latest
+    keep_alive_seconds: 3600           # Container lifetime
+    env_inherit:
+      - OPENAI_API_KEY                 # Pass through env vars
+      - ANTHROPIC_API_KEY
+```
+
+**Features**:
+- Process isolation
+- Resource limits (CPU, memory)
+- Network isolation
+- Automatic cleanup
+
+**Volume Mounts**:
+- Thread data: `{host_thread_path} → /mnt/user-data`
+- Skills: `{host_skills_path} → /mnt/skills`
+
+<Card title="Docker Setup Guide" icon="docker" href="/guides/docker-setup">
+  Configure Docker sandbox for development
+</Card>
+
+## Kubernetes Sandbox (Provisioner)
+
+For production deployments, the Kubernetes sandbox creates pods on-demand via a provisioner service.
+
+**Configuration** (`config.yaml`):
+```yaml
+sandbox:
+  use: src.community.aio_sandbox:AioSandboxProvider
+  aio_sandbox:
+    provisioner_url: http://provisioner:8002
+    kubeconfig_path: /path/to/kubeconfig  # Optional
+```
+
+**Architecture**:
+```
+┌──────────────┐    HTTP    ┌─────────────┐    K8s API    ┌──────────┐
+│ LangGraph    │───────────▶│ Provisioner │──────────────▶│ Sandbox  │
+│ Server       │            │ Service     │               │ Pod      │
+└──────────────┘            └─────────────┘               └──────────┘
+```
+
+**Features**:
+- Horizontal scaling
+- Resource quotas
+- Pod security policies
+- Persistent storage
+
+<Card title="Kubernetes Deployment" icon="dharmachakra" href="/deployment/kubernetes">
+  Deploy DeerFlow with Kubernetes sandboxes
+</Card>
+
+## Sandbox Lifecycle
+
+Sandboxes are managed by the `SandboxMiddleware`:
+
+```python
+class SandboxMiddleware:
+    async def before_agent(self, state: ThreadState, config: RunnableConfig):
+        # Acquire sandbox for thread
+        sandbox = await sandbox_provider.acquire(thread_id)
+        state["sandbox"] = sandbox
+        state["sandbox_id"] = sandbox.sandbox_id
+    
+    async def after_agent(self, state: ThreadState):
+        # Release sandbox
+        await sandbox_provider.release(state["sandbox_id"])
+```
+
+**Lifecycle**:
+1. **Acquire**: Get or create sandbox for thread
+2. **Execute**: Run commands and file operations
+3. **Release**: Return sandbox to pool or destroy
+
+## Sandbox Tools
+
+The sandbox provides five core tools:
+
+<AccordionGroup>
+  <Accordion title="bash - Execute commands">
+    Execute shell commands in the sandbox.
+    
+    ```python
+    result = await sandbox.execute_command("ls -la /mnt/user-data/uploads")
+    ```
+    
+    **Path Translation**: Automatic for virtual paths
+    
+    **Error Handling**: Returns stderr and exit code
+  </Accordion>
+  
+  <Accordion title="ls - List directory">
+    List directory contents in tree format.
+    
+    ```python
+    result = await sandbox.list_dir("/mnt/user-data/workspace")
+    ```
+    
+    **Output**: Tree format, max 2 levels deep
+  </Accordion>
+  
+  <Accordion title="read_file - Read file">
+    Read file contents with optional line range.
+    
+    ```python
+    content = await sandbox.read_file(
+        path="/mnt/user-data/workspace/data.csv",
+        start_line=10,
+        end_line=20
+    )
+    ```
+  </Accordion>
+  
+  <Accordion title="write_file - Write file">
+    Write or append to files.
+    
+    ```python
+    await sandbox.write_file(
+        path="/mnt/user-data/outputs/report.txt",
+        content="Analysis complete",
+        mode="append"
+    )
+    ```
+    
+    **Auto-creates**: Parent directories as needed
+  </Accordion>
+  
+  <Accordion title="str_replace - Replace text">
+    Replace text in files (single or all occurrences).
+    
+    ```python
+    await sandbox.str_replace(
+        path="/mnt/user-data/workspace/config.py",
+        old_str="DEBUG = True",
+        new_str="DEBUG = False",
+        replace_all=False
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+<Card title="Sandbox Tools API" icon="wrench" href="/api/tools/sandbox">
+  View complete tool reference
+</Card>
+
+## Thread Isolation
+
+Each thread has its own isolated filesystem:
+
+```
+backend/.deer-flow/threads/
+├── thread-abc123/
+│   └── user-data/
+│       ├── workspace/     # Independent workspace
+│       ├── uploads/       # Thread-specific uploads
+│       └── outputs/       # Thread-specific outputs
+└── thread-xyz789/
+    └── user-data/
+        ├── workspace/     # Separate workspace
+        ├── uploads/       # Different uploads
+        └── outputs/       # Different outputs
+```
+
+**Benefits**:
+- No cross-contamination between threads
+- Concurrent execution without conflicts
+- Easy cleanup (delete thread directory)
+
+## Platform Differences
+
+Sandbox behavior varies by platform:
+
+<Tabs>
+  <Tab title="Linux">
+    - Docker socket: `/var/run/docker.sock`
+    - Native path mounting
+    - Best performance
+  </Tab>
+  
+  <Tab title="macOS">
+    - Docker Desktop or OrbStack
+    - VirtioFS for file mounts (slower)
+    - May require `gRPCFUSE` for better performance
+  </Tab>
+  
+  <Tab title="Windows">
+    - Docker Desktop with WSL2
+    - Path translation required
+    - Use WSL2 paths for better performance
+  </Tab>
+</Tabs>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use virtual paths in agent prompts">
+    Always reference `/mnt/user-data/` and `/mnt/skills/` in prompts:
+    
+    ```
+    Read the uploaded file at /mnt/user-data/uploads/data.csv
+    ```
+    
+    Not: `backend/.deer-flow/threads/abc123/user-data/uploads/data.csv`
+  </Accordion>
+  
+  <Accordion title="Store outputs in /mnt/user-data/outputs">
+    User-facing files should go in the outputs directory:
+    
+    ```python
+    write_file(
+        path="/mnt/user-data/outputs/report.html",
+        content=html_content
+    )
+    ```
+    
+    Then present with `present_files(["/mnt/user-data/outputs/report.html"])`
+  </Accordion>
+  
+  <Accordion title="Clean up temporary files">
+    Remove temporary files in workspace after use:
+    
+    ```python
+    bash("rm /mnt/user-data/workspace/temp.csv")
+    ```
+  </Accordion>
+  
+  <Accordion title="Handle errors gracefully">
+    Check command exit codes:
+    
+    ```python
+    result = bash("python script.py")
+    if result["exit_code"] != 0:
+        # Handle error
+        error = result["stderr"]
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Sandbox Configuration" icon="gear" href="/configuration/sandbox-modes">
+    Configure sandbox providers
+  </Card>
+  <Card title="Sandbox Tools" icon="wrench" href="/api/tools/sandbox">
+    Tool API reference
+  </Card>
+  <Card title="Docker Setup" icon="docker" href="/guides/docker-setup">
+    Set up Docker sandbox
+  </Card>
+  <Card title="Kubernetes" icon="dharmachakra" href="/deployment/kubernetes">
+    Deploy with K8s sandboxes
+  </Card>
+</CardGroup>

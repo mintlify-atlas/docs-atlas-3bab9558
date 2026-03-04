@@ -1,80 +1,529 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick Start Guide
+description: Get DeerFlow running in minutes with Docker or local development setup
 ---
 
-## Get started in three steps
+# Quick Start
 
-Get your documentation site running locally and make your first customization.
+Get DeerFlow up and running in just a few steps. This guide covers both Docker (recommended) and local development setups.
 
-### Step 1: Set up your local environment
+<Info>
+**Prerequisites:** Git, and either Docker (for Docker setup) or Node.js 22+, pnpm, uv, and nginx (for local development).
+</Info>
+
+## Step 1: Clone the Repository
+
+First, clone the DeerFlow repository:
+
+```bash
+git clone https://github.com/bytedance/deer-flow.git
+cd deer-flow
+```
+
+## Step 2: Configuration
+
+### Generate Configuration Files
+
+Run the following command from the project root directory:
+
+```bash
+make config
+```
+
+This command creates local configuration files based on example templates:
+- `config.yaml` - Main application configuration
+- `.env` - Environment variables
+- `frontend/.env` - Frontend environment variables
+
+<Warning>
+The `make config` command will abort if configuration files already exist to prevent overwriting your settings.
+</Warning>
+
+### Configure Your Model
+
+Edit `config.yaml` and define at least one model. Here's an example with OpenAI's GPT-4:
+
+<CodeGroup>
+```yaml OpenAI (GPT-4)
+models:
+  - name: gpt-4                       # Internal identifier
+    display_name: GPT-4               # Human-readable name
+    use: langchain_openai:ChatOpenAI  # LangChain class path
+    model: gpt-4                      # Model identifier for API
+    api_key: $OPENAI_API_KEY          # API key (use env var)
+    max_tokens: 4096                  # Maximum tokens per request
+    temperature: 0.7                  # Sampling temperature
+    supports_vision: true             # Enable vision support
+```
+
+```yaml Anthropic (Claude)
+models:
+  - name: claude-3-5-sonnet
+    display_name: Claude 3.5 Sonnet
+    use: langchain_anthropic:ChatAnthropic
+    model: claude-3-5-sonnet-20241022
+    api_key: $ANTHROPIC_API_KEY
+    max_tokens: 8192
+    supports_vision: true
+```
+
+```yaml DeepSeek (with Thinking)
+models:
+  - name: deepseek-v3
+    display_name: DeepSeek V3 (Thinking)
+    use: src.models.patched_deepseek:PatchedChatDeepSeek
+    model: deepseek-reasoner
+    api_key: $DEEPSEEK_API_KEY
+    max_tokens: 16384
+    supports_thinking: true
+    supports_vision: false
+    when_thinking_enabled:
+      extra_body:
+        thinking:
+          type: enabled
+```
+
+```yaml Google (Gemini)
+models:
+  - name: gemini-2.5-pro
+    display_name: Gemini 2.5 Pro
+    use: langchain_google_genai:ChatGoogleGenerativeAI
+    model: gemini-2.5-pro
+    google_api_key: $GOOGLE_API_KEY
+    max_tokens: 8192
+    supports_vision: true
+```
+</CodeGroup>
+
+<Tip>
+**Environment Variables:** Config values starting with `$` are resolved from environment variables (e.g., `$OPENAI_API_KEY`).
+</Tip>
+
+### Set API Keys
+
+Choose one of the following methods to configure your API keys:
+
+<Tabs>
+  <Tab title="Option A: .env File (Recommended)">
+    Edit the `.env` file in the project root:
+    
+    ```bash .env
+    TAVILY_API_KEY=your-tavily-api-key
+    OPENAI_API_KEY=your-openai-api-key
+    ANTHROPIC_API_KEY=your-anthropic-api-key
+    # Add other provider keys as needed
+    ```
+  </Tab>
+  
+  <Tab title="Option B: Shell Export">
+    Export environment variables in your shell:
+    
+    ```bash
+    export OPENAI_API_KEY=your-openai-api-key
+    export TAVILY_API_KEY=your-tavily-api-key
+    ```
+  </Tab>
+  
+  <Tab title="Option C: Direct in config.yaml">
+    Edit `config.yaml` directly (not recommended for production):
+    
+    ```yaml
+    models:
+      - name: gpt-4
+        api_key: sk-your-actual-api-key-here  # Replace placeholder
+    ```
+    
+    <Warning>
+    Not recommended for production. Use environment variables instead.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Step 3: Running the Application
+
+<Tabs>
+  <Tab title="Docker (Recommended)">
+    The fastest way to get started with a consistent environment.
+    
+    <Steps>
+      <Step title="Initialize Docker">
+        Pull the sandbox image (only needed once or when the image updates):
+        
+        ```bash
+        make docker-init
+        ```
+        
+        This downloads the sandbox container image (~500MB+) used for isolated code execution.
+      </Step>
+      
+      <Step title="Start Services">
+        Start all services:
+        
+        ```bash
+        make docker-start
+        ```
+        
+        This command automatically detects your sandbox mode from `config.yaml` and starts the appropriate services:
+        - **Local/Docker sandbox mode:** Starts frontend, gateway, langgraph, and nginx
+        - **Provisioner mode:** Also starts the provisioner service for Kubernetes-based sandboxes
+      </Step>
+      
+      <Step title="Access DeerFlow">
+        Open your browser and navigate to:
+        
+        ```
+        http://localhost:2026
+        ```
+        
+        You should see the DeerFlow chat interface.
+      </Step>
+    </Steps>
+    
+    ### Useful Docker Commands
+    
+    ```bash
+    # Stop all services
+    make docker-stop
+    
+    # View all logs
+    make docker-logs
+    
+    # View frontend logs only
+    make docker-logs-frontend
+    
+    # View gateway logs only
+    make docker-logs-gateway
+    ```
+    
+    <Info>
+    See the [CONTRIBUTING.md](https://github.com/bytedance/deer-flow/blob/main/CONTRIBUTING.md) guide for detailed Docker development workflows.
+    </Info>
+  </Tab>
+  
+  <Tab title="Local Development">
+    Run services locally without Docker for faster iteration.
+    
+    <Steps>
+      <Step title="Check Prerequisites">
+        Verify all required tools are installed:
+        
+        ```bash
+        make check
+        ```
+        
+        This verifies:
+        - Node.js 22+
+        - pnpm (JavaScript package manager)
+        - uv (Python package manager)
+        - nginx (reverse proxy)
+        
+        If any tools are missing, the command provides installation instructions.
+      </Step>
+      
+      <Step title="Install Dependencies">
+        Install frontend and backend dependencies:
+        
+        ```bash
+        make install
+        ```
+        
+        This runs:
+        - `cd backend && uv sync` - Backend Python dependencies
+        - `cd frontend && pnpm install` - Frontend JavaScript dependencies
+      </Step>
+      
+      <Step title="(Optional) Pre-pull Sandbox Image">
+        If using Docker-based sandbox, pre-pull the container image:
+        
+        ```bash
+        make setup-sandbox
+        ```
+        
+        This is optional but recommended to avoid delays during first use.
+      </Step>
+      
+      <Step title="Start Services">
+        Start all services in development mode:
+        
+        ```bash
+        make dev
+        ```
+        
+        This starts:
+        - **LangGraph Server** (port 2024) - Agent runtime
+        - **Gateway API** (port 8001) - REST API for models, skills, memory
+        - **Frontend** (port 3000) - Next.js web interface
+        - **Nginx** (port 2026) - Reverse proxy
+      </Step>
+      
+      <Step title="Access DeerFlow">
+        Open your browser and navigate to:
+        
+        ```
+        http://localhost:2026
+        ```
+        
+        You should see the DeerFlow chat interface.
+      </Step>
+    </Steps>
+    
+    ### Development Workflow
+    
+    Logs are written to the `logs/` directory:
+    
+    ```bash
+    # View logs
+    tail -f logs/langgraph.log
+    tail -f logs/gateway.log
+    tail -f logs/frontend.log
+    tail -f logs/nginx.log
+    
+    # Stop all services
+    make stop
+    
+    # Clean up logs and processes
+    make clean
+    ```
+    
+    <Tip>
+    Press `Ctrl+C` in the terminal running `make dev` to stop all services gracefully.
+    </Tip>
+  </Tab>
+</Tabs>
+
+## Step 4: Verify Installation
+
+Once DeerFlow is running, verify the installation:
+
+<Steps>
+  <Step title="Check the Interface">
+    Navigate to `http://localhost:2026` and ensure the chat interface loads.
+  </Step>
+  
+  <Step title="Send a Test Message">
+    Type a simple message like "Hello, can you help me?" and verify the agent responds.
+  </Step>
+  
+  <Step title="Check Model Configuration">
+    Look for the model selector in the interface to confirm your configured models are available.
+  </Step>
+</Steps>
+
+## Advanced Configuration
+
+### Sandbox Mode
+
+DeerFlow supports multiple sandbox execution modes:
+
+<Tabs>
+  <Tab title="Local Execution (Default)">
+    Runs sandbox code directly on the host machine. Simple but less isolated.
+    
+    ```yaml config.yaml
+    sandbox:
+      use: src.sandbox.local:LocalSandboxProvider
+    ```
+  </Tab>
+  
+  <Tab title="Docker Execution">
+    Runs sandbox code in isolated Docker containers. Recommended for most use cases.
+    
+    ```yaml config.yaml
+    sandbox:
+      use: src.community.aio_sandbox:AioSandboxProvider
+      
+      # Optional: Container image to use
+      # image: enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+      
+      # Optional: Base port for sandbox containers
+      # port: 8080
+      
+      # Optional: Auto-start containers
+      # auto_start: true
+      
+      # Optional: Container name prefix
+      # container_prefix: deer-flow-sandbox
+    ```
+    
+    **Platform Support:**
+    - **macOS:** Automatically uses Apple Container if available, falls back to Docker
+    - **Linux/Windows:** Uses Docker
+  </Tab>
+  
+  <Tab title="Kubernetes Provisioner">
+    Each sandbox gets a dedicated Pod in Kubernetes, managed by the provisioner service. For production or advanced users.
+    
+    ```yaml config.yaml
+    sandbox:
+      use: src.community.aio_sandbox:AioSandboxProvider
+      provisioner_url: http://provisioner:8002
+    ```
+    
+    When using provisioner mode, `make docker-start` automatically starts the provisioner service.
+  </Tab>
+</Tabs>
+
+<Info>
+See the [Sandbox Configuration Guide](https://github.com/bytedance/deer-flow/blob/main/backend/docs/CONFIGURATION.md#sandbox) for detailed instructions.
+</Info>
+
+### MCP Servers
+
+DeerFlow supports configurable MCP (Model Context Protocol) servers to extend capabilities.
+
+**Supported transports:**
+- **stdio** - Command-based servers (e.g., GitHub, filesystem)
+- **HTTP** - REST API servers with OAuth support
+- **SSE** - Server-Sent Events servers
+
+<CodeGroup>
+```json stdio Server Example
+{
+  "mcpServers": {
+    "github": {
+      "enabled": true,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {"GITHUB_TOKEN": "$GITHUB_TOKEN"}
+    }
+  }
+}
+```
+
+```json HTTP Server with OAuth
+{
+  "mcpServers": {
+    "secure-api": {
+      "enabled": true,
+      "type": "http",
+      "url": "https://api.example.com/mcp",
+      "oauth": {
+        "enabled": true,
+        "token_url": "https://auth.example.com/oauth/token",
+        "grant_type": "client_credentials",
+        "client_id": "$MCP_CLIENT_ID",
+        "client_secret": "$MCP_CLIENT_SECRET"
+      }
+    }
+  }
+}
+```
+</CodeGroup>
+
+<Info>
+See the [MCP Server Guide](https://github.com/bytedance/deer-flow/blob/main/backend/docs/MCP_SERVER.md) for detailed setup instructions.
+</Info>
+
+## Common Issues
 
 <AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+  <Accordion title="Port Already in Use">
+    If you see errors about ports 2024, 2026, 3000, or 8001 being in use:
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
+    ```bash
+    # Find and kill processes using these ports
+    lsof -ti:2026 | xargs kill -9
+    lsof -ti:2024 | xargs kill -9
+    lsof -ti:8001 | xargs kill -9
+    lsof -ti:3000 | xargs kill -9
+    
+    # Or use make clean
+    make clean
+    ```
   </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+  
+  <Accordion title="Missing Dependencies">
+    If `make check` reports missing tools:
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
+    ```bash
+    # Install Node.js 22+
+    # Visit: https://nodejs.org/
+    
+    # Install pnpm
+    npm install -g pnpm
+    
+    # Install uv
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    
+    # Install nginx
+    # macOS:
+    brew install nginx
+    # Ubuntu:
+    sudo apt install nginx
+    ```
+  </Accordion>
+  
+  <Accordion title="Config File Not Found">
+    Ensure `config.yaml` is in the project root:
+    
+    ```bash
+    # Check if config exists
+    ls -la config.yaml
+    
+    # If missing, run make config
+    make config
+    ```
+    
+    **Config search order:**
+    1. `DEER_FLOW_CONFIG_PATH` environment variable (if set)
+    2. `backend/config.yaml` (current directory)
+    3. `config.yaml` (parent directory - recommended)
+  </Accordion>
+  
+  <Accordion title="Docker Image Pull Fails">
+    If `make docker-init` fails to pull the sandbox image:
+    
+    ```bash
+    # Try pulling manually
+    docker pull enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+    
+    # Or use a mirror (China users)
+    # Update config.yaml:
+    sandbox:
+      image: your-mirror-registry/all-in-one-sandbox:latest
+    ```
+  </Accordion>
+  
+  <Accordion title="API Key Not Working">
+    Verify your API keys are correctly set:
+    
+    ```bash
+    # Check environment variables
+    echo $OPENAI_API_KEY
+    
+    # Verify .env file
+    cat .env
+    
+    # Test config loading (from backend directory)
+    cd backend
+    python -c "from src.config import get_app_config; print(get_app_config().models[0].api_key)"
+    ```
   </Accordion>
 </AccordionGroup>
 
-### Step 2: Deploy your changes
+## What's Next?
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
+Now that DeerFlow is running, explore these guides:
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Configuration Guide" icon="gear" href="/configuration">
+    Deep dive into models, tools, sandbox, and memory configuration
+  </Card>
+  
+  <Card title="Skills Management" icon="puzzle-piece" href="/skills">
+    Learn how to use, create, and install custom skills
+  </Card>
+  
+  <Card title="Architecture" icon="diagram-project" href="/architecture">
+    Understand DeerFlow's technical architecture
+  </Card>
+  
+  <Card title="API Reference" icon="book" href="/api">
+    Complete API documentation for integration
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+<Info>
+**Need help?** Report issues at [github.com/bytedance/deer-flow/issues](https://github.com/bytedance/deer-flow/issues)
+</Info>

@@ -1,0 +1,517 @@
+---
+title: "Configuration Methods"
+description: "Manage models, skills, memory, and files"
+icon: "gear"
+---
+
+## Overview
+
+The DeerFlowClient provides methods to query and update configuration, manage skills, handle file uploads, and access agent-produced artifacts.
+
+## Models
+
+### list_models()
+
+List available models from configuration.
+
+```python
+result = client.list_models()
+```
+
+<ResponseField name="models" type="list[dict]">
+  List of model info dictionaries.
+  
+  <Expandable title="Model object">
+    <ResponseField name="name" type="str" required>
+      Model identifier.
+    </ResponseField>
+    <ResponseField name="display_name" type="str | None">
+      Human-readable model name.
+    </ResponseField>
+    <ResponseField name="description" type="str | None">
+      Model description.
+    </ResponseField>
+    <ResponseField name="supports_thinking" type="bool">
+      Whether model supports extended thinking mode.
+    </ResponseField>
+    <ResponseField name="supports_reasoning_effort" type="bool">
+      Whether model supports reasoning effort parameter.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+#### Example
+
+```python
+result = client.list_models()
+for model in result["models"]:
+    print(f"{model['name']}: {model['display_name']}")
+```
+
+### get_model(name)
+
+Get a specific model's configuration by name.
+
+<ParamField path="name" type="str" required>
+  Model name.
+</ParamField>
+
+```python
+model = client.get_model("gpt-4")
+if model:
+    print(model["supports_thinking"])
+```
+
+<ResponseField name="model" type="dict | None">
+  Model info dict, or None if not found.
+</ResponseField>
+
+## Skills
+
+### list_skills(enabled_only)
+
+List available skills.
+
+<ParamField path="enabled_only" type="bool" default="False">
+  If True, only return enabled skills.
+</ParamField>
+
+```python
+result = client.list_skills(enabled_only=True)
+```
+
+<ResponseField name="skills" type="list[dict]">
+  List of skill info dictionaries.
+  
+  <Expandable title="Skill object">
+    <ResponseField name="name" type="str" required>
+      Skill identifier.
+    </ResponseField>
+    <ResponseField name="description" type="str">
+      Skill description.
+    </ResponseField>
+    <ResponseField name="license" type="str">
+      Skill license (e.g., "MIT").
+    </ResponseField>
+    <ResponseField name="category" type="str">
+      Skill category ("public", "custom", etc.).
+    </ResponseField>
+    <ResponseField name="enabled" type="bool">
+      Whether skill is currently enabled.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### get_skill(name)
+
+Get a specific skill by name.
+
+<ParamField path="name" type="str" required>
+  Skill name.
+</ParamField>
+
+```python
+skill = client.get_skill("web-search")
+if skill:
+    print(f"Enabled: {skill['enabled']}")
+```
+
+### update_skill(name, enabled)
+
+Update a skill's enabled status.
+
+<ParamField path="name" type="str" required>
+  Skill name.
+</ParamField>
+
+<ParamField path="enabled" type="bool" required>
+  New enabled status.
+</ParamField>
+
+```python
+result = client.update_skill("web-search", enabled=False)
+print(f"Skill now: {result['enabled']}")
+```
+
+<Warning>
+Calls `reset_agent()` internally - the agent will be recreated on next use.
+</Warning>
+
+**Raises:**
+- `ValueError` - If skill not found
+- `OSError` - If config file cannot be written
+
+### install_skill(skill_path)
+
+Install a skill from a .skill archive (ZIP).
+
+<ParamField path="skill_path" type="str | Path" required>
+  Path to the .skill file.
+</ParamField>
+
+```python
+result = client.install_skill("/path/to/my-skill.skill")
+print(f"Installed: {result['skill_name']}")
+```
+
+<ResponseField name="result" type="dict">
+  <Expandable title="properties">
+    <ResponseField name="success" type="bool">
+      Whether installation succeeded.
+    </ResponseField>
+    <ResponseField name="skill_name" type="str">
+      Name of the installed skill.
+    </ResponseField>
+    <ResponseField name="message" type="str">
+      Installation status message.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Raises:**
+- `FileNotFoundError` - If file does not exist
+- `ValueError` - If file is invalid or skill already exists
+
+## Memory
+
+### get_memory()
+
+Get current memory data.
+
+```python
+memory = client.get_memory()
+print(f"Version: {memory['version']}")
+print(f"Facts: {len(memory['facts'])}")
+```
+
+<ResponseField name="memory" type="dict">
+  Memory data dict with `version` and `facts` keys.
+</ResponseField>
+
+### reload_memory()
+
+Reload memory data from file, forcing cache invalidation.
+
+```python
+refreshed = client.reload_memory()
+print(f"Reloaded {len(refreshed['facts'])} facts")
+```
+
+### get_memory_config()
+
+Get memory system configuration.
+
+```python
+config = client.get_memory_config()
+print(f"Enabled: {config['enabled']}")
+print(f"Max facts: {config['max_facts']}")
+```
+
+<ResponseField name="config" type="dict">
+  <Expandable title="properties">
+    <ResponseField name="enabled" type="bool">
+      Whether memory system is enabled.
+    </ResponseField>
+    <ResponseField name="storage_path" type="str">
+      Path to memory storage file.
+    </ResponseField>
+    <ResponseField name="debounce_seconds" type="int">
+      Debounce delay before writing updates.
+    </ResponseField>
+    <ResponseField name="max_facts" type="int">
+      Maximum number of facts to store.
+    </ResponseField>
+    <ResponseField name="fact_confidence_threshold" type="float">
+      Minimum confidence for fact extraction.
+    </ResponseField>
+    <ResponseField name="injection_enabled" type="bool">
+      Whether memory injection is enabled.
+    </ResponseField>
+    <ResponseField name="max_injection_tokens" type="int">
+      Maximum tokens for memory injection.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### get_memory_status()
+
+Get memory status: config + current data.
+
+```python
+status = client.get_memory_status()
+print(status["config"]["enabled"])
+print(len(status["data"]["facts"]))
+```
+
+## MCP Configuration
+
+### get_mcp_config()
+
+Get MCP server configurations.
+
+```python
+result = client.get_mcp_config()
+for server_name, config in result["mcp_servers"].items():
+    print(f"{server_name}: enabled={config['enabled']}")
+```
+
+<ResponseField name="mcp_servers" type="dict[str, dict]">
+  Dict mapping server name to config.
+</ResponseField>
+
+### update_mcp_config(mcp_servers)
+
+Update MCP server configurations.
+
+<ParamField path="mcp_servers" type="dict[str, dict]" required>
+  Dict mapping server name to config dict. Each value should contain keys like `enabled`, `type`, `command`, `args`, `env`, `url`, etc.
+</ParamField>
+
+```python
+result = client.update_mcp_config({
+    "github": {
+        "enabled": True,
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"]
+    }
+})
+```
+
+<Warning>
+Writes to extensions_config.json and calls `reset_agent()` - the agent will be recreated on next use.
+</Warning>
+
+**Raises:**
+- `FileNotFoundError` - If config file cannot be located
+- `OSError` - If config file cannot be written
+
+## File Uploads
+
+### upload_files(thread_id, files)
+
+Upload local files into a thread's uploads directory.
+
+<ParamField path="thread_id" type="str" required>
+  Target thread ID.
+</ParamField>
+
+<ParamField path="files" type="list[str | Path]" required>
+  List of local file paths to upload.
+</ParamField>
+
+```python
+result = client.upload_files("my-thread", [
+    "/path/to/document.pdf",
+    "/path/to/data.csv"
+])
+print(f"Uploaded {len(result['files'])} files")
+```
+
+<Info>
+For PDF, PPT, Excel, and Word files, they are also converted to Markdown automatically.
+</Info>
+
+<ResponseField name="result" type="dict">
+  <Expandable title="properties">
+    <ResponseField name="success" type="bool">
+      Whether upload succeeded.
+    </ResponseField>
+    <ResponseField name="files" type="list[dict]">
+      List of uploaded file info.
+      
+      <Expandable title="File object">
+        <ResponseField name="filename" type="str">
+          Original filename.
+        </ResponseField>
+        <ResponseField name="size" type="str">
+          File size in bytes.
+        </ResponseField>
+        <ResponseField name="path" type="str">
+          Actual filesystem path.
+        </ResponseField>
+        <ResponseField name="virtual_path" type="str">
+          Virtual path for agent (/mnt/user-data/uploads/...).
+        </ResponseField>
+        <ResponseField name="artifact_url" type="str">
+          URL to download the file via Gateway API.
+        </ResponseField>
+        <ResponseField name="markdown_file" type="str" optional>
+          Markdown conversion filename (if applicable).
+        </ResponseField>
+        <ResponseField name="markdown_virtual_path" type="str" optional>
+          Virtual path for markdown file.
+        </ResponseField>
+        <ResponseField name="markdown_artifact_url" type="str" optional>
+          URL to download markdown via Gateway API.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    <ResponseField name="message" type="str">
+      Upload status message.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Raises:**
+- `FileNotFoundError` - If any file does not exist
+
+### list_uploads(thread_id)
+
+List files in a thread's uploads directory.
+
+<ParamField path="thread_id" type="str" required>
+  Thread ID.
+</ParamField>
+
+```python
+result = client.list_uploads("my-thread")
+for file in result["files"]:
+    print(f"{file['filename']}: {file['size']} bytes")
+```
+
+<ResponseField name="result" type="dict">
+  <Expandable title="properties">
+    <ResponseField name="files" type="list[dict]">
+      List of file info dicts.
+    </ResponseField>
+    <ResponseField name="count" type="int">
+      Number of files.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### delete_upload(thread_id, filename)
+
+Delete a file from a thread's uploads directory.
+
+<ParamField path="thread_id" type="str" required>
+  Thread ID.
+</ParamField>
+
+<ParamField path="filename" type="str" required>
+  Filename to delete.
+</ParamField>
+
+```python
+result = client.delete_upload("my-thread", "document.pdf")
+print(result["message"])
+```
+
+**Raises:**
+- `FileNotFoundError` - If file does not exist
+- `PermissionError` - If path traversal is detected
+
+## Artifacts
+
+### get_artifact(thread_id, path)
+
+Read an artifact file produced by the agent.
+
+<ParamField path="thread_id" type="str" required>
+  Thread ID.
+</ParamField>
+
+<ParamField path="path" type="str" required>
+  Virtual path (e.g., "mnt/user-data/outputs/file.txt").
+</ParamField>
+
+```python
+content, mime_type = client.get_artifact(
+    "my-thread",
+    "mnt/user-data/outputs/result.json"
+)
+data = json.loads(content)
+print(f"MIME type: {mime_type}")
+```
+
+<ResponseField name="return" type="tuple[bytes, str]">
+  Tuple of (file_bytes, mime_type).
+</ResponseField>
+
+**Raises:**
+- `FileNotFoundError` - If artifact does not exist
+- `ValueError` - If path is invalid
+- `PermissionError` - If path traversal is detected
+
+## Agent Management
+
+### reset_agent()
+
+Force the internal agent to be recreated on the next call.
+
+```python
+client.reset_agent()
+```
+
+Use this after:
+- External changes to memory
+- Skill installations
+- Configuration updates that should be reflected in the system prompt or tool set
+
+<Info>
+This is automatically called by `update_skill()` and `update_mcp_config()`.
+</Info>
+
+## Complete Example
+
+```python
+from src.client import DeerFlowClient
+from pathlib import Path
+
+# Initialize
+client = DeerFlowClient()
+
+# Query configuration
+models = client.list_models()
+print(f"Available models: {[m['name'] for m in models['models']]}")
+
+skills = client.list_skills(enabled_only=True)
+print(f"Enabled skills: {[s['name'] for s in skills['skills']]}")
+
+# Memory status
+status = client.get_memory_status()
+print(f"Memory enabled: {status['config']['enabled']}")
+print(f"Facts stored: {len(status['data']['facts'])}")
+
+# Upload files
+thread_id = "analysis-session"
+result = client.upload_files(thread_id, [
+    Path("data.csv"),
+    Path("report.pdf")
+])
+print(f"Uploaded: {[f['filename'] for f in result['files']]}")
+
+# Run analysis
+for event in client.stream(
+    "Analyze the data.csv file and create a summary",
+    thread_id=thread_id
+):
+    if event.type == "messages-tuple" and event.data.get("type") == "ai":
+        if content := event.data.get("content"):
+            print(f"AI: {content}")
+
+# Get artifact
+try:
+    content, mime = client.get_artifact(
+        thread_id,
+        "mnt/user-data/outputs/summary.txt"
+    )
+    print(f"Summary: {content.decode()}")
+except FileNotFoundError:
+    print("No summary generated")
+
+# List uploaded files
+uploads = client.list_uploads(thread_id)
+print(f"Files in thread: {[f['filename'] for f in uploads['files']]}")
+
+# Cleanup
+client.delete_upload(thread_id, "data.csv")
+print("Cleaned up temporary files")
+```
+
+## See Also
+
+- [Chat](/api/python-client/chat) - For simple request/response
+- [Streaming](/api/python-client/streaming) - For real-time events
+- [Overview](/api/python-client/overview) - For initialization options

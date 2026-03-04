@@ -1,0 +1,674 @@
+---
+title: Performance Optimization
+description: Improve memory usage, context window management, sandbox performance, and scaling
+---
+
+## Memory Usage
+
+<Accordion title="High memory consumption by backend services">
+  **Problem**: Backend processes consuming excessive RAM (>4GB).
+
+  **Solution**:
+
+  1. **Monitor memory usage**:
+     ```bash
+     # Check process memory
+     ps aux | grep -E "langgraph|uvicorn|python" | awk '{print $4"% "$11}'
+
+     # Docker container memory
+     docker stats --no-stream
+
+     # System memory
+     free -h  # Linux
+     vm_stat  # macOS
+     ```
+
+  2. **Enable context summarization**:
+     ```yaml
+     # In config.yaml
+     summarization:
+       enabled: true  # ✅ Enable to reduce memory
+       trigger:
+         - type: tokens
+           value: 15564  # Trigger when reaching ~16K tokens
+       keep:
+         type: messages
+         value: 10  # Keep recent 10 messages only
+       trim_tokens_to_summarize: 15564
+     ```
+
+  3. **Reduce memory injection**:
+     ```yaml
+     # In config.yaml
+     memory:
+       enabled: true
+       max_injection_tokens: 2000  # ✅ Limit memory in prompt
+       max_facts: 100  # Limit stored facts
+       fact_confidence_threshold: 0.7  # Only high-confidence facts
+     ```
+
+  4. **Limit concurrent subagents**:
+     ```python
+     # In backend/src/subagents/executor.py (default: 3)
+     MAX_CONCURRENT_SUBAGENTS = 2  # Reduce from 3 to 2
+     ```
+
+  5. **Configure thread pool sizes**:
+     ```python
+     # In backend/src/subagents/executor.py
+     _scheduler_pool = ThreadPoolExecutor(max_workers=2)  # Default: 3
+     _execution_pool = ThreadPoolExecutor(max_workers=2)  # Default: 3
+     ```
+
+  6. **Use lightweight models for non-critical tasks**:
+     ```yaml
+     models:
+       - name: gpt-4  # Primary model for agent
+         # ...
+       - name: gpt-4o-mini  # Lightweight for summarization/memory
+         use: langchain_openai:ChatOpenAI
+         model: gpt-4o-mini
+         max_tokens: 2048
+
+     # Use lightweight model for background tasks
+     summarization:
+       model_name: gpt-4o-mini
+     memory:
+       model_name: gpt-4o-mini
+     title:
+       model_name: gpt-4o-mini
+     ```
+</Accordion>
+
+<Accordion title="Memory leak in long-running sessions">
+  **Problem**: Memory usage grows continuously over multiple conversations.
+
+  **Solution**:
+
+  1. **Clear conversation history periodically**:
+     ```bash
+     # Start fresh thread for new task
+     # Frontend: Click "New Conversation"
+     # API: Use new thread_id
+     ```
+
+  2. **Enable aggressive summarization**:
+     ```yaml
+     summarization:
+       enabled: true
+       trigger:
+         - type: messages
+           value: 20  # Summarize after 20 messages (more aggressive)
+       keep:
+         type: messages
+         value: 5  # Keep only 5 recent messages
+     ```
+
+  3. **Clean up old threads**:
+     ```bash
+     # Remove old thread data
+     find backend/.deer-flow/threads -type d -mtime +7 -exec rm -rf {} \;
+     # Removes threads older than 7 days
+     ```
+
+  4. **Restart services periodically**:
+     ```bash
+     # Automated restart script
+     make stop
+     sleep 5
+     make dev
+     ```
+
+  5. **Monitor and set memory limits (Docker)**:
+     ```yaml
+     # In docker-compose-dev.yaml
+     services:
+       langgraph:
+         deploy:
+           resources:
+             limits:
+               memory: 4G  # Limit to 4GB
+             reservations:
+               memory: 2G  # Reserve 2GB
+       gateway:
+         deploy:
+           resources:
+             limits:
+               memory: 2G
+     ```
+</Accordion>
+
+<Accordion title="Out of memory errors in sandbox containers">
+  **Problem**: `OOMKilled` or memory errors in sandbox containers.
+
+  **Solution**:
+
+  1. **Increase Docker memory limit**:
+     ```bash
+     # Docker Desktop: Settings → Resources → Memory
+     # Increase to at least 4GB (8GB recommended)
+     ```
+
+  2. **Configure container resource limits**:
+     ```yaml
+     # In config.yaml for Docker sandbox
+     sandbox:
+       use: src.community.aio_sandbox:AioSandboxProvider
+       # Add resource limits (if supported by your setup)
+       memory_limit: "2g"  # 2GB per sandbox
+       cpu_limit: 2  # 2 CPU cores
+     ```
+
+  3. **For Kubernetes provisioner mode**:
+     ```python
+     # In docker/provisioner/app/provisioner.py
+     # Adjust Pod resource limits:
+     resources=client.V1ResourceRequirements(
+         requests={"memory": "512Mi", "cpu": "500m"},
+         limits={"memory": "2Gi", "cpu": "2000m"}  # Increase limits
+     )
+     ```
+
+  4. **Clean up sandbox artifacts**:
+     ```bash
+     # Clear outputs from old threads
+     find backend/.deer-flow/threads -type f -name "*.png" -mtime +1 -delete
+     find backend/.deer-flow/threads -type f -name "*.pdf" -mtime +1 -delete
+     ```
+
+  5. **Limit file sizes in sandbox**:
+     ```python
+     # Agent instruction in system prompt
+     # "Keep generated files under 10MB each"
+     # "Use compression for large data files"
+     ```
+</Accordion>
+
+## Context Window Optimization
+
+<Accordion title="Context length exceeded errors">
+  **Problem**: `Context length exceeded` or `Maximum token limit` errors.
+
+  **Solution**:
+
+  1. **Enable summarization (most important)**:
+     ```yaml
+     # In config.yaml
+     summarization:
+       enabled: true  # ✅ Critical for long conversations
+       trigger:
+         - type: fraction
+           value: 0.8  # Trigger at 80% of model's limit
+       keep:
+         type: messages
+         value: 10
+     ```
+
+  2. **Use models with larger context windows**:
+     ```yaml
+     models:
+       # GPT-4 Turbo: 128K context
+       - name: gpt-4-turbo
+         use: langchain_openai:ChatOpenAI
+         model: gpt-4-turbo-preview
+
+       # Claude 3.5 Sonnet: 200K context
+       - name: claude-3.5-sonnet
+         use: langchain_anthropic:ChatAnthropic
+         model: claude-3-5-sonnet-20241022
+
+       # Gemini 2.5 Pro: 1M context
+       - name: gemini-2.5-pro
+         use: langchain_google_genai:ChatGoogleGenerativeAI
+         model: gemini-2.5-pro
+     ```
+
+  3. **Reduce memory injection tokens**:
+     ```yaml
+     memory:
+       max_injection_tokens: 1000  # Reduce from 2000
+     ```
+
+  4. **Limit skill injection**:
+     ```json
+     // In extensions_config.json
+     // Disable unused skills to reduce prompt size
+     {
+       "skills": {
+         "research": {"enabled": true},
+         "report-generation": {"enabled": true},
+         "image-generation": {"enabled": false},  // Disable if not needed
+         "video-generation": {"enabled": false},
+         "slide-creation": {"enabled": false}
+       }
+     }
+     ```
+
+  5. **Optimize tool descriptions**:
+     ```python
+     # Keep tool descriptions concise
+     # Tools with long descriptions add to context
+     # Edit tool docstrings in backend/src/sandbox/tools.py
+     ```
+
+  6. **Use subagents for isolated context**:
+     ```python
+     # Each subagent has its own context
+     # Break complex tasks into subagents instead of long single conversation
+     # Agent will automatically delegate when appropriate
+     ```
+</Accordion>
+
+<Accordion title="Slow response times due to large context">
+  **Problem**: Model takes >30 seconds to respond as conversation grows.
+
+  **Solution**:
+
+  1. **Aggressive summarization**:
+     ```yaml
+     summarization:
+       enabled: true
+       trigger:
+         - type: tokens
+           value: 8000  # Lower threshold for faster response
+         - type: messages
+           value: 15  # Or after 15 messages
+       keep:
+         type: messages
+         value: 5  # Keep fewer messages
+     ```
+
+  2. **Start new thread for new topics**:
+     ```bash
+     # Don't try to do everything in one thread
+     # Use frontend "New Conversation" button
+     # Or create new thread_id via API
+     ```
+
+  3. **Offload data to files**:
+     ```python
+     # Instead of keeping large data in conversation:
+     # 1. Write to /mnt/user-data/workspace/data.json
+     # 2. Reference file path in subsequent messages
+     # 3. Read only what's needed
+     ```
+
+  4. **Disable thinking mode for simple queries**:
+     ```yaml
+     # Thinking mode adds significant tokens
+     # Only enable for complex reasoning tasks
+     models:
+       - name: deepseek-v3
+         supports_thinking: true
+         # Manually toggle thinking via frontend toggle
+     ```
+</Accordion>
+
+## Sandbox Performance
+
+<Accordion title="Slow container startup times">
+  **Problem**: Sandbox container takes >10 seconds to start.
+
+  **Solution**:
+
+  1. **Pre-pull sandbox image** (most important):
+     ```bash
+     # Run before first use
+     make setup-sandbox
+
+     # Or manually:
+     docker pull enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+     ```
+
+  2. **Use Apple Container on macOS** (faster than Docker):
+     ```bash
+     # Install Apple Container
+     # Download from: https://github.com/apple/container/releases
+
+     # DeerFlow automatically uses it if available
+     container --version
+     container system start
+     ```
+
+  3. **Keep existing sandbox instead of recreating**:
+     ```yaml
+     # In config.yaml - use existing sandbox URL
+     sandbox:
+       use: src.community.aio_sandbox:AioSandboxProvider
+       base_url: http://localhost:8080  # Reuse existing sandbox
+       auto_start: false  # Don't start new containers
+     ```
+
+  4. **Optimize Docker storage driver**:
+     ```bash
+     # Check current driver
+     docker info | grep "Storage Driver"
+
+     # overlay2 is fastest (default on modern systems)
+     # If using devicemapper or aufs, consider migration
+     ```
+
+  5. **Use local sandbox for development**:
+     ```yaml
+     # Fastest option - no container overhead
+     sandbox:
+       use: src.sandbox.local:LocalSandboxProvider
+     # Note: Less isolation, use only for development
+     ```
+</Accordion>
+
+<Accordion title="Slow file operations in sandbox">
+  **Problem**: Reading/writing files in sandbox is sluggish.
+
+  **Solution**:
+
+  1. **Check mount type (macOS)**:
+     ```yaml
+     # macOS: Avoid volumes, use bind mounts
+     # Already configured correctly in DeerFlow
+     # Verify in docker inspect output
+     ```
+
+  2. **Reduce file I/O**:
+     ```python
+     # Read files once and cache in conversation
+     # Avoid repeated read_file calls for same file
+
+     # Write batch files together:
+     # - Better: Write all outputs at end
+     # - Worse: Write each file individually during processing
+     ```
+
+  3. **Use smaller files**:
+     ```bash
+     # Large files (>100MB) slow down sandbox
+     # Compress before uploading
+     # Split large datasets into chunks
+     ```
+
+  4. **For Kubernetes provisioner - use local paths**:
+     ```yaml
+     # Ensure SKILLS_HOST_PATH and THREADS_HOST_PATH
+     # point to local SSD, not network storage
+     ```
+
+  5. **Optimize Docker Desktop settings (macOS)**:
+     ```bash
+     # Docker Desktop → Settings → Resources
+     # Use VirtioFS instead of gRPC FUSE (faster)
+     # Enable "Use new Virtualization framework"
+     ```
+</Accordion>
+
+<Accordion title="Bash commands execute slowly in sandbox">
+  **Problem**: Shell commands take longer than expected in sandbox.
+
+  **Solution**:
+
+  1. **Increase container CPU allocation**:
+     ```bash
+     # Docker Desktop → Settings → Resources
+     # Increase CPUs to 4+ (from default 2)
+     ```
+
+  2. **Use local sandbox for CPU-intensive tasks**:
+     ```yaml
+     # For development/testing
+     sandbox:
+       use: src.sandbox.local:LocalSandboxProvider
+     ```
+
+  3. **Optimize commands**:
+     ```bash
+     # Avoid: Slow commands
+     find / -name "*.py"  # Searches entire filesystem
+
+     # Better: Targeted commands
+     find /mnt/user-data -name "*.py"  # Only search workspace
+     ```
+
+  4. **Use bash agent for complex command sequences**:
+     ```python
+     # Instead of multiple bash tool calls:
+     # Delegate to bash subagent for multi-step shell tasks
+     # Bash agent is optimized for command execution
+     ```
+</Accordion>
+
+## Scaling Considerations
+
+<Accordion title="Multiple concurrent users or threads">
+  **Problem**: Performance degrades with multiple simultaneous conversations.
+
+  **Solution**:
+
+  1. **Use provisioner mode with Kubernetes**:
+     ```yaml
+     # In config.yaml
+     sandbox:
+       use: src.community.aio_sandbox:AioSandboxProvider
+       provisioner_url: http://provisioner:8002
+       # Each thread gets isolated Pod
+     ```
+
+  2. **Configure resource limits per thread**:
+     ```python
+     # In docker/provisioner/app/provisioner.py
+     # Set appropriate limits based on your cluster capacity
+     resources=client.V1ResourceRequirements(
+         requests={"memory": "256Mi", "cpu": "250m"},  # Per sandbox
+         limits={"memory": "1Gi", "cpu": "1000m"}
+     )
+     ```
+
+  3. **Implement request queuing (advanced)**:
+     ```python
+     # Add rate limiting in backend/src/gateway/app.py
+     from fastapi import FastAPI, Request
+     from slowapi import Limiter, _rate_limit_exceeded_handler
+     from slowapi.util import get_remote_address
+
+     limiter = Limiter(key_func=get_remote_address)
+     app = FastAPI()
+     app.state.limiter = limiter
+     app.add_exception_handler(429, _rate_limit_exceeded_handler)
+
+     @app.post("/api/chat")
+     @limiter.limit("10/minute")  # Max 10 requests per minute
+     async def chat(request: Request):
+         # ...
+     ```
+
+  4. **Use multiple model providers**:
+     ```yaml
+     # Distribute load across providers
+     models:
+       - name: openai-gpt4
+         use: langchain_openai:ChatOpenAI
+         # ...
+       - name: anthropic-claude
+         use: langchain_anthropic:ChatAnthropic
+         # ...
+       - name: google-gemini
+         use: langchain_google_genai:ChatGoogleGenerativeAI
+         # ...
+     ```
+
+  5. **Horizontal scaling (advanced)**:
+     ```bash
+     # Run multiple backend instances behind load balancer
+     # Use Redis for shared state/checkpointing
+     # Configure in docker-compose or Kubernetes
+     ```
+</Accordion>
+
+<Accordion title="Database/storage bottlenecks (memory.json, threads)">
+  **Problem**: Slow memory updates or thread data access.
+
+  **Solution**:
+
+  1. **Increase memory debounce time**:
+     ```yaml
+     # In config.yaml
+     memory:
+       debounce_seconds: 60  # Increase from 30 to reduce writes
+     ```
+
+  2. **Use SSD for thread storage**:
+     ```bash
+     # Ensure backend/.deer-flow/ is on SSD, not HDD
+     # Check with:
+     df -Th backend/.deer-flow/
+     ```
+
+  3. **Clean up old threads regularly**:
+     ```bash
+     # Cron job to clean threads older than 30 days
+     0 2 * * * find /path/to/backend/.deer-flow/threads -type d -mtime +30 -exec rm -rf {} \;
+     ```
+
+  4. **Limit fact storage**:
+     ```yaml
+     memory:
+       max_facts: 50  # Reduce from 100
+       fact_confidence_threshold: 0.8  # Higher threshold = fewer facts
+     ```
+
+  5. **Use external database (advanced)**:
+     ```python
+     # Replace file-based memory with PostgreSQL/MongoDB
+     # Implement custom memory backend in backend/src/agents/memory/
+     # Use LangGraph's PostgresSaver for checkpointing
+     ```
+</Accordion>
+
+<Accordion title="Network latency to LLM providers">
+  **Problem**: Slow responses due to network issues.
+
+  **Solution**:
+
+  1. **Use geographically closer endpoints**:
+     ```yaml
+     # For providers with regional endpoints
+     models:
+       - name: gpt-4
+         use: langchain_openai:ChatOpenAI
+         base_url: https://api.openai.com/v1  # Default
+         # Some providers offer regional endpoints
+     ```
+
+  2. **Increase timeout for slow connections**:
+     ```yaml
+     models:
+       - name: gpt-4
+         timeout: 120  # Increase from 60 to 120 seconds
+         max_retries: 3  # Retry on timeout
+     ```
+
+  3. **Use local models (Ollama, LM Studio)**:
+     ```yaml
+     models:
+       - name: ollama-local
+         use: langchain_openai:ChatOpenAI
+         model: llama3.2
+         base_url: http://localhost:11434/v1
+         api_key: ollama
+         # Zero network latency
+     ```
+
+  4. **Implement caching (advanced)**:
+     ```python
+     # Cache LLM responses for repeated queries
+     # Use LangChain's caching layer:
+     from langchain.cache import InMemoryCache, SQLiteCache
+     from langchain.globals import set_llm_cache
+
+     set_llm_cache(SQLiteCache(database_path=".langchain.db"))
+     ```
+
+  5. **Monitor provider status**:
+     ```bash
+     # Check provider status pages
+     # OpenAI: https://status.openai.com/
+     # Anthropic: https://status.anthropic.com/
+     # If provider is degraded, switch to backup model
+     ```
+</Accordion>
+
+## Performance Monitoring
+
+<Accordion title="How to monitor and profile DeerFlow performance">
+  **Solution**:
+
+  1. **Enable detailed logging**:
+     ```python
+     # In backend/src/ files
+     import logging
+     logging.basicConfig(level=logging.DEBUG)
+     # Check logs/backend.log for bottlenecks
+     ```
+
+  2. **Monitor resource usage**:
+     ```bash
+     # Real-time monitoring
+     watch -n 1 'ps aux | grep -E "langgraph|uvicorn" | grep -v grep'
+
+     # Docker stats
+     docker stats
+
+     # System monitoring
+     htop  # Linux
+     Activity Monitor  # macOS
+     ```
+
+  3. **Track API response times**:
+     ```bash
+     # Add timing to requests
+     time curl -X POST http://localhost:2026/api/langgraph/threads/xxx/runs/stream \
+       -H "Content-Type: application/json" \
+       -d '{...}'
+     ```
+
+  4. **Profile Python code (advanced)**:
+     ```python
+     # Add profiling to backend
+     import cProfile
+     import pstats
+
+     profiler = cProfile.Profile()
+     profiler.enable()
+     # ... code to profile ...
+     profiler.disable()
+     stats = pstats.Stats(profiler)
+     stats.sort_stats('cumulative')
+     stats.print_stats(20)  # Top 20 slowest functions
+     ```
+
+  5. **Use LangSmith for LLM tracing** (advanced):
+     ```bash
+     # Set environment variables
+     export LANGCHAIN_TRACING_V2=true
+     export LANGCHAIN_API_KEY=your-langsmith-key
+     export LANGCHAIN_PROJECT=deerflow
+
+     # Restart DeerFlow
+     # View traces at https://smith.langchain.com
+     ```
+
+  6. **Benchmark specific operations**:
+     ```bash
+     # Test sandbox performance
+     time docker exec <sandbox-container> bash -c "for i in {1..100}; do echo test > /tmp/test_$i.txt; done"
+
+     # Test model latency
+     cd backend
+     time uv run python -c "from langchain_openai import ChatOpenAI; llm = ChatOpenAI(model='gpt-4'); print(llm.invoke('test').content)"
+     ```
+</Accordion>
+
+## Next Steps
+
+- [Common Issues](/troubleshooting/common-issues) - General troubleshooting
+- [Sandbox Errors](/troubleshooting/sandbox-errors) - Container-specific issues
+- [Configuration Guide](/configuration/config-yaml) - Optimize your configuration
+- [Architecture](/advanced/architecture) - Understand system design for better optimization

@@ -1,97 +1,280 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "DeerFlow Documentation"
+description: "Build powerful AI agents with sandboxes, memory, skills, and sub-agents"
+mode: "custom"
 ---
 
-## Setting up
+<div className="relative overflow-hidden dark:bg-[#0f1117] bg-white">
+  {/* Hero Section */}
+  <div className="relative py-20 px-6 sm:px-8 lg:px-12">
+    <div className="max-w-7xl mx-auto">
+      <div className="grid lg:grid-cols-12 gap-12 items-center">
+        <div className="lg:col-span-7">
+          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold dark:text-gray-100 text-gray-900 mb-6">
+            Build AI agents that actually get things done
+          </h1>
+          <p className="text-base sm:text-lg lg:text-xl dark:text-gray-400 text-gray-600 mb-8 max-w-2xl">
+            DeerFlow is an open-source super agent harness powered by LangGraph. Orchestrate sub-agents, manage memory, execute code in sandboxes, and extend capabilities with custom skills.
+          </p>
+          <div className="flex flex-wrap gap-4">
+            <a 
+              href="/quickstart" 
+              className="inline-flex items-center px-6 py-3 rounded-lg font-semibold transition-colors bg-[#996f4b] text-white hover:bg-[#b6a18e]"
+            >
+              Get started
+            </a>
+            <a 
+              href="/introduction" 
+              className="inline-flex items-center px-6 py-3 rounded-lg font-semibold transition-colors border dark:border-white/30 dark:bg-white/10 dark:text-white border-gray-300 bg-gray-50 text-gray-900 dark:hover:bg-white/20 hover:bg-gray-100"
+            >
+              View documentation
+            </a>
+          </div>
+        </div>
+        <div className="hidden lg:block lg:col-span-5">
+          <div className="dark:bg-[#1a1d27] bg-gray-50 rounded-2xl p-6 dark:border-[#27272a] border-gray-200 border">
+            <div className="space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="w-2 h-2 rounded-full bg-[#996f4b] mt-2"></div>
+                <div>
+                  <div className="font-semibold dark:text-gray-100 text-gray-900 mb-1">Agent orchestration</div>
+                  <div className="text-sm dark:text-gray-400 text-gray-600">Spawn sub-agents for complex multi-step tasks</div>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <div className="w-2 h-2 rounded-full bg-[#996f4b] mt-2"></div>
+                <div>
+                  <div className="font-semibold dark:text-gray-100 text-gray-900 mb-1">Sandbox execution</div>
+                  <div className="text-sm dark:text-gray-400 text-gray-600">Isolated Docker containers with full filesystem</div>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <div className="w-2 h-2 rounded-full bg-[#996f4b] mt-2"></div>
+                <div>
+                  <div className="font-semibold dark:text-gray-100 text-gray-900 mb-1">Long-term memory</div>
+                  <div className="text-sm dark:text-gray-400 text-gray-600">Persistent memory with fact extraction</div>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <div className="w-2 h-2 rounded-full bg-[#996f4b] mt-2"></div>
+                <div>
+                  <div className="font-semibold dark:text-gray-100 text-gray-900 mb-1">Extensible skills</div>
+                  <div className="text-sm dark:text-gray-400 text-gray-600">Progressive loading of custom capabilities</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-Get your documentation site up and running in minutes.
+{/* Quick Start Section */}
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-semibold dark:text-white text-gray-900 mb-3">
+    Quick start
+  </h2>
+  <p className="text-base dark:text-gray-400 text-gray-600 mb-8">
+    Get DeerFlow running in minutes with Docker or local development
+  </p>
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+  <Steps>
+    <Step title="Clone the repository">
+      Clone the DeerFlow repository and navigate to the directory:
+      
+      ```bash
+      git clone https://github.com/bytedance/deer-flow.git
+      cd deer-flow
+      ```
+    </Step>
 
-## Make it yours
+    <Step title="Configure your model">
+      Generate configuration files and set up your LLM model:
+      
+      ```bash
+      make config
+      ```
+      
+      Edit `config.yaml` to configure at least one model with your API key:
+      
+      ```yaml
+      models:
+        - name: gpt-4
+          display_name: GPT-4
+          use: langchain_openai:ChatOpenAI
+          model: gpt-4
+          api_key: $OPENAI_API_KEY
+          max_tokens: 4096
+      ```
+    </Step>
 
-Design a docs site that looks great and empowers your users.
+    <Step title="Start DeerFlow">
+      Launch all services with Docker (recommended):
+      
+      ```bash
+      make docker-init    # Pull sandbox image (first time only)
+      make docker-start   # Start all services
+      ```
+      
+      Or run locally:
+      
+      ```bash
+      make dev
+      ```
+      
+      Access the application at http://localhost:2026
+    </Step>
+  </Steps>
+</div>
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+{/* Core Features Section */}
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-semibold dark:text-white text-gray-900 mb-3">
+    Core features
+  </h2>
+  <p className="text-base dark:text-gray-400 text-gray-600 mb-8">
+    Everything you need to build production-ready AI agents
+  </p>
 
-## Create beautiful pages
+  <CardGroup cols={2}>
+    <Card title="Agent orchestration" icon="sitemap" href="/concepts/agent-system">
+      LangGraph-based agent system with dynamic tool loading and sub-agent delegation
+    </Card>
+    <Card title="Sandbox execution" icon="box" href="/concepts/sandbox">
+      Isolated Docker containers with filesystem access and bash command execution
+    </Card>
+    <Card title="Skills system" icon="puzzle-piece" href="/concepts/skills">
+      Extensible capabilities loaded progressively to keep context lean
+    </Card>
+    <Card title="Long-term memory" icon="brain" href="/concepts/memory">
+      Persistent memory with fact extraction and context summarization
+    </Card>
+    <Card title="MCP integration" icon="plug" href="/configuration/skills-and-mcp">
+      Connect external tools via Model Context Protocol with OAuth support
+    </Card>
+    <Card title="Multi-model support" icon="layer-group" href="/configuration/models">
+      Use any OpenAI-compatible LLM with vision and reasoning capabilities
+    </Card>
+  </CardGroup>
+</div>
 
-Everything you need to create world-class documentation.
+{/* Explore Documentation Section */}
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-semibold dark:text-white text-gray-900 mb-3">
+    Explore documentation
+  </h2>
+  <p className="text-base dark:text-gray-400 text-gray-600 mb-8">
+    Learn how to configure, extend, and deploy DeerFlow
+  </p>
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <a href="/concepts/architecture" className="group block rounded-2xl border dark:border-[#27272a] border-gray-200 overflow-hidden no-underline transition-colors dark:hover:border-[#996f4b] hover:border-[#996f4b] dark:bg-[#1a1d27] bg-gray-50">
+      <div className="p-6">
+        <h3 className="text-base font-semibold dark:text-gray-100 text-gray-900 mb-2">
+          Core concepts
+        </h3>
+        <p className="text-sm dark:text-gray-400 text-gray-600 mb-4">
+          Understand DeerFlow's architecture, agent system, sandbox, and memory
+        </p>
+        <div className="flex items-center text-sm font-medium dark:text-gray-400 text-gray-600 dark:group-hover:text-[#996f4b] group-hover:text-[#996f4b] transition-colors">
+          Learn more
+          <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
 
-## Need inspiration?
+    <a href="/guides/installation" className="group block rounded-2xl border dark:border-[#27272a] border-gray-200 overflow-hidden no-underline transition-colors dark:hover:border-[#996f4b] hover:border-[#996f4b] dark:bg-[#1a1d27] bg-gray-50">
+      <div className="p-6">
+        <h3 className="text-base font-semibold dark:text-gray-100 text-gray-900 mb-2">
+          Setup guides
+        </h3>
+        <p className="text-sm dark:text-gray-400 text-gray-600 mb-4">
+          Docker deployment, local development, and custom skill creation
+        </p>
+        <div className="flex items-center text-sm font-medium dark:text-gray-400 text-gray-600 dark:group-hover:text-[#996f4b] group-hover:text-[#996f4b] transition-colors">
+          View guides
+          <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+    <a href="/api/python-client/overview" className="group block rounded-2xl border dark:border-[#27272a] border-gray-200 overflow-hidden no-underline transition-colors dark:hover:border-[#996f4b] hover:border-[#996f4b] dark:bg-[#1a1d27] bg-gray-50">
+      <div className="p-6">
+        <h3 className="text-base font-semibold dark:text-gray-100 text-gray-900 mb-2">
+          Python client
+        </h3>
+        <p className="text-sm dark:text-gray-400 text-gray-600 mb-4">
+          Embedded client for in-process agent access with streaming support
+        </p>
+        <div className="flex items-center text-sm font-medium dark:text-gray-400 text-gray-600 dark:group-hover:text-[#996f4b] group-hover:text-[#996f4b] transition-colors">
+          API reference
+          <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+
+    <a href="/advanced/middleware-chain" className="group block rounded-2xl border dark:border-[#27272a] border-gray-200 overflow-hidden no-underline transition-colors dark:hover:border-[#996f4b] hover:border-[#996f4b] dark:bg-[#1a1d27] bg-gray-50">
+      <div className="p-6">
+        <h3 className="text-base font-semibold dark:text-gray-100 text-gray-900 mb-2">
+          Advanced topics
+        </h3>
+        <p className="text-sm dark:text-gray-400 text-gray-600 mb-4">
+          Deep dive into middleware chain, thread state, and context engineering
+        </p>
+        <div className="flex items-center text-sm font-medium dark:text-gray-400 text-gray-600 dark:group-hover:text-[#996f4b] group-hover:text-[#996f4b] transition-colors">
+          Explore
+          <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+  </div>
+</div>
+
+{/* Resources Section */}
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-semibold dark:text-white text-gray-900 mb-3">
+    Resources
+  </h2>
+  <p className="text-base dark:text-gray-400 text-gray-600 mb-8">
+    Get help and contribute to the project
+  </p>
+
+  <CardGroup cols={3}>
+    <Card title="GitHub" icon="github" href="https://github.com/bytedance/deer-flow">
+      View source code, report issues, and contribute
+    </Card>
+    <Card title="Contributing" icon="code-pull-request" href="/advanced/contributing">
+      Learn how to contribute to DeerFlow development
+    </Card>
+    <Card title="License" icon="scale-balanced" href="https://github.com/bytedance/deer-flow/blob/main/LICENSE">
+      Open source under the MIT License
+    </Card>
+  </CardGroup>
+</div>
+
+{/* Closing CTA */}
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="rounded-2xl dark:bg-[#1a1d27] bg-gray-50 dark:border-[#27272a] border-gray-200 border p-8 sm:p-12 text-center">
+    <h2 className="text-2xl sm:text-3xl font-bold dark:text-white text-gray-900 mb-4">
+      Ready to build powerful AI agents?
+    </h2>
+    <p className="text-base dark:text-gray-400 text-gray-600 mb-6 max-w-2xl mx-auto">
+      Get started with DeerFlow today and create agents that can research, code, and execute complex tasks autonomously
+    </p>
+    <a 
+      href="/quickstart" 
+      className="inline-flex items-center px-6 py-3 rounded-lg font-semibold transition-colors bg-[#996f4b] text-white hover:bg-[#b6a18e]"
+    >
+      Get started
+    </a>
+  </div>
+</div>

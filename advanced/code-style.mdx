@@ -1,0 +1,519 @@
+---
+title: Code Style Guide
+description: Python code style guidelines, Ruff configuration, and formatting standards for DeerFlow development
+---
+
+DeerFlow follows consistent code style guidelines to ensure maintainability and readability across the codebase.
+
+## Python Code Style
+
+### Style Tools
+
+We use **Ruff** for both linting and formatting:
+- **Linter**: Catches code quality issues, unused imports, and potential bugs
+- **Formatter**: Ensures consistent code formatting across the project
+
+### Ruff Configuration
+
+Configuration is defined in `backend/ruff.toml`:
+
+```toml
+line-length = 240
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "I", "UP"]
+ignore = []
+
+[format]
+quote-style = "double"
+indent-style = "space"
+```
+
+#### Configuration Details
+
+**Line Length**: 240 characters
+- Longer than PEP 8's 79 characters
+- Allows for more readable complex expressions
+- Reduces need for line continuations
+- Modern wide-screen displays accommodate longer lines
+
+**Target Version**: Python 3.12+
+- Uses latest Python features
+- Ruff suggests modern syntax improvements
+
+**Lint Rules**:
+- `E` - pycodestyle error rules
+- `F` - Pyflakes rules (undefined names, unused imports)
+- `I` - isort import sorting rules
+- `UP` - pyupgrade rules (syntax modernization)
+
+**Quote Style**: Double quotes (`"`)
+- Consistent with JSON and YAML
+- More readable for strings containing apostrophes
+
+**Indent Style**: Spaces (4 spaces per level)
+- Standard Python indentation
+- More consistent across editors
+
+### Running Ruff
+
+From the `backend/` directory:
+
+```bash
+# Check for linting issues
+make lint
+# or
+uvx ruff check .
+
+# Format code and fix auto-fixable issues
+make format
+# or
+uvx ruff check . --fix && uvx ruff format .
+
+# Format code only
+uvx ruff format .
+
+# Check specific file
+uvx ruff check src/agents/lead_agent/agent.py
+
+# Format specific file
+uvx ruff format src/agents/lead_agent/agent.py
+```
+
+### Pre-commit Integration
+
+Run Ruff automatically before committing:
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.11
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+```
+
+Install pre-commit hooks:
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+## Python Style Guidelines
+
+### Type Hints
+
+**Always use type hints** for function parameters and return values:
+
+```python
+# Good
+def process_message(message: str, thread_id: str) -> dict[str, Any]:
+    return {"status": "success", "thread_id": thread_id}
+
+# Bad
+def process_message(message, thread_id):
+    return {"status": "success", "thread_id": thread_id}
+```
+
+For complex types, use `typing` module:
+
+```python
+from typing import Any, Optional
+from collections.abc import Sequence
+
+def get_tools(
+    groups: Sequence[str],
+    include_mcp: bool = True,
+    model_name: Optional[str] = None,
+) -> list[Any]:
+    pass
+```
+
+### Imports
+
+**Order imports** using isort rules (automatically handled by Ruff):
+
+1. Standard library imports
+2. Third-party imports
+3. Local application imports
+
+```python
+# Standard library
+import os
+import sys
+from pathlib import Path
+
+# Third-party
+import httpx
+import yaml
+from fastapi import FastAPI
+from langchain_core.messages import AIMessage
+
+# Local
+from src.agents.thread_state import ThreadState
+from src.config import get_app_config
+```
+
+**Use absolute imports** for project modules:
+
+```python
+# Good
+from src.agents.lead_agent import make_lead_agent
+from src.sandbox.local import LocalSandboxProvider
+
+# Bad (relative imports)
+from ..lead_agent import make_lead_agent
+from .local import LocalSandboxProvider
+```
+
+### Naming Conventions
+
+**Modules and packages**: `lowercase_with_underscores`
+```python
+src/agents/middlewares/
+src/sandbox/tools.py
+```
+
+**Classes**: `PascalCase`
+```python
+class ThreadState:
+    pass
+
+class LocalSandboxProvider:
+    pass
+```
+
+**Functions and variables**: `lowercase_with_underscores`
+```python
+def create_chat_model(name: str) -> Any:
+    pass
+
+thread_id = "abc123"
+max_concurrent_subagents = 3
+```
+
+**Constants**: `UPPERCASE_WITH_UNDERSCORES`
+```python
+MAX_CONCURRENT_SUBAGENTS = 3
+DEFAULT_TIMEOUT = 15 * 60
+KUBECONFIG_PATH = "/etc/k8s/config"
+```
+
+**Private attributes**: Prefix with single underscore
+```python
+class Client:
+    def __init__(self):
+        self._agent = None
+        self._model_name = None
+```
+
+### Docstrings
+
+**Use docstrings** for modules, classes, and functions:
+
+```python
+def create_chat_model(name: str, thinking_enabled: bool = False) -> Any:
+    """Create a chat model instance from configuration.
+    
+    Args:
+        name: Model name as defined in config.yaml
+        thinking_enabled: Whether to enable extended thinking mode
+    
+    Returns:
+        Instantiated chat model object
+    
+    Raises:
+        ValueError: If model name not found in configuration
+    """
+    pass
+```
+
+For simple functions, a one-line docstring is sufficient:
+
+```python
+def get_thread_path(thread_id: str) -> Path:
+    """Get the filesystem path for a thread's data directory."""
+    return Path(f".deer-flow/threads/{thread_id}")
+```
+
+### Comments
+
+**Use comments sparingly** - prefer self-documenting code:
+
+```python
+# Good: Code is self-explanatory
+if model.supports_vision and image_data:
+    messages.append(create_image_message(image_data))
+
+# Bad: Comment states the obvious
+# Check if model supports vision and image data exists
+if model.supports_vision and image_data:
+    # Append image message
+    messages.append(create_image_message(image_data))
+```
+
+**Use comments for complex logic**:
+
+```python
+# Virtual path system maps agent-visible paths to physical locations:
+#   /mnt/user-data/{workspace,uploads,outputs} -> backend/.deer-flow/threads/{thread_id}/user-data/...
+#   /mnt/skills -> deer-flow/skills/
+def replace_virtual_path(virtual_path: str, thread_id: str) -> str:
+    pass
+```
+
+### Function Length
+
+**Keep functions focused** - aim for functions under 50 lines:
+
+```python
+# Good: Single responsibility
+def validate_config(config: dict) -> None:
+    """Validate configuration schema."""
+    if not config.get("models"):
+        raise ValueError("No models configured")
+    validate_model_configs(config["models"])
+    validate_tool_configs(config.get("tools", []))
+
+def validate_model_configs(models: list) -> None:
+    """Validate model configurations."""
+    for model in models:
+        if not model.get("name"):
+            raise ValueError("Model missing name")
+        # ...
+```
+
+### Error Handling
+
+**Use specific exceptions**:
+
+```python
+# Good
+if not config_path.exists():
+    raise FileNotFoundError(f"Config file not found: {config_path}")
+
+if not api_key:
+    raise ValueError("API key required for OpenAI models")
+
+# Bad
+if not config_path.exists():
+    raise Exception("Config file not found")
+```
+
+**Provide context in error messages**:
+
+```python
+# Good
+raise ValueError(
+    f"Model '{model_name}' not found in configuration. "
+    f"Available models: {', '.join(available_models)}"
+)
+
+# Bad
+raise ValueError("Model not found")
+```
+
+### String Formatting
+
+**Use f-strings** for string formatting:
+
+```python
+# Good
+path = f"/mnt/user-data/{thread_id}/workspace"
+message = f"Processing {len(items)} items"
+
+# Acceptable for very simple cases
+path = "/mnt/user-data/" + thread_id + "/workspace"
+
+# Bad (outdated)
+path = "/mnt/user-data/{}/workspace".format(thread_id)
+path = "/mnt/user-data/%s/workspace" % thread_id
+```
+
+### Dictionary and List Handling
+
+**Use dict.get() with defaults**:
+
+```python
+# Good
+api_key = config.get("api_key", os.getenv("OPENAI_API_KEY"))
+max_tokens = config.get("max_tokens", 2000)
+
+# Bad (raises KeyError if missing)
+api_key = config["api_key"]
+```
+
+**Use comprehensions** for simple transformations:
+
+```python
+# Good
+enabled_skills = [s for s in skills if s.enabled]
+model_names = [m.name for m in config.models]
+
+# Bad (verbose)
+enabled_skills = []
+for s in skills:
+    if s.enabled:
+        enabled_skills.append(s)
+```
+
+### Context Managers
+
+**Use context managers** for resource management:
+
+```python
+# Good
+with open(config_path) as f:
+    config = yaml.safe_load(f)
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    process_files(tmpdir)
+
+# Bad (resource leak risk)
+f = open(config_path)
+config = yaml.safe_load(f)
+f.close()
+```
+
+### Data Classes
+
+**Use Pydantic models** for configuration and data validation:
+
+```python
+from pydantic import BaseModel, Field
+
+class ModelConfig(BaseModel):
+    """Configuration for a single LLM model."""
+    
+    name: str
+    display_name: str
+    use: str = Field(..., description="Module path to model class")
+    api_key: str | None = None
+    supports_thinking: bool = False
+    supports_vision: bool = False
+```
+
+## Frontend Code Style
+
+### TypeScript Guidelines
+
+The frontend uses TypeScript with ESLint and Prettier:
+
+```bash
+# From frontend/ directory
+
+# Run linter
+pnpm lint
+
+# Run linter with auto-fix
+pnpm lint:fix
+
+# Format code
+pnpm format
+```
+
+### TypeScript Style Highlights
+
+- **Interfaces over types** for object shapes
+- **Explicit return types** for functions
+- **Functional components** with hooks
+- **Named exports** for components
+- **Async/await** over promises
+
+## Documentation Standards
+
+### Code Documentation Policy
+
+**CRITICAL: Always update documentation after code changes**
+
+When making code changes:
+1. Update `README.md` for user-facing changes
+2. Update `CLAUDE.md` for development/architecture changes
+3. Update inline code documentation
+4. Update API documentation if endpoints change
+5. Add migration notes for breaking changes
+
+### Documentation Format
+
+- Use clear, concise language
+- Include code examples
+- Explain *why*, not just *what*
+- Keep documentation in sync with code
+- Use proper Markdown formatting
+
+## Linting CI Integration
+
+Linting runs automatically in CI:
+
+```bash
+# In CI pipeline
+cd backend
+make lint
+
+# Must pass for PR approval
+```
+
+Fix linting issues before pushing:
+
+```bash
+# Fix issues automatically
+make format
+
+# Check remaining issues
+make lint
+```
+
+## Configuration Files Reference
+
+### Backend Configuration
+
+**`backend/ruff.toml`** - Ruff linter and formatter configuration
+
+```toml
+line-length = 240
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "I", "UP"]
+ignore = []
+
+[format]
+quote-style = "double"
+indent-style = "space"
+```
+
+**`backend/pyproject.toml`** - Python project metadata and dependencies
+
+```toml
+[project]
+name = "deer-flow"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+[dependency-groups]
+dev = ["pytest>=8.0.0", "ruff>=0.14.11"]
+```
+
+### Style Checklist
+
+Before committing code:
+
+- [ ] Run `make format` to auto-fix style issues
+- [ ] Run `make lint` to check for remaining issues
+- [ ] Run `make test` to ensure tests pass
+- [ ] All functions have type hints
+- [ ] Complex logic has explanatory comments
+- [ ] Public functions have docstrings
+- [ ] Imports are organized (automatic with Ruff)
+- [ ] No unused imports or variables
+- [ ] Documentation updated if needed
+
+## Resources
+
+- [Ruff Documentation](https://docs.astral.sh/ruff/)
+- [Python Type Hints](https://docs.python.org/3/library/typing.html)
+- [Pydantic Documentation](https://docs.pydantic.dev/)
+- [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html)

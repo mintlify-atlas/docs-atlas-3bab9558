@@ -1,0 +1,604 @@
+---
+title: Model Configuration Issues
+description: Solutions for API keys, model loading, and LLM provider configuration problems
+---
+
+## API Key Issues
+
+<Accordion title="API key not recognized or treated as literal string">
+  **Problem**: Config contains `$OPENAI_API_KEY` literally instead of the actual key value.
+
+  **Solution**:
+
+  DeerFlow automatically resolves environment variables in config values that start with `$`.
+
+  1. **Correct syntax in config.yaml**:
+     ```yaml
+     models:
+       - name: gpt-4
+         api_key: $OPENAI_API_KEY  # ✅ Correct: $ prefix
+         # NOT: api_key: ${OPENAI_API_KEY}  # ❌ Wrong: bash syntax
+         # NOT: api_key: "sk-..."  # ❌ Wrong: hardcoded secret
+     ```
+
+  2. **Verify environment variable is set**:
+     ```bash
+     # Test in same shell where you run DeerFlow
+     echo $OPENAI_API_KEY
+     # Should output: sk-proj-...
+     # If empty, variable is not set
+     ```
+
+  3. **Set environment variable properly**:
+
+     **Option A: .env file (recommended for Docker)**:
+     ```bash
+     # Create/edit .env in project root
+     cat >> .env << EOF
+     OPENAI_API_KEY=sk-proj-your-key-here
+     ANTHROPIC_API_KEY=sk-ant-your-key-here
+     EOF
+
+     # Restart services to load .env
+     make stop && make dev
+     ```
+
+     **Option B: Shell export**:
+     ```bash
+     export OPENAI_API_KEY="sk-proj-your-key-here"
+     
+     # Add to profile to persist
+     echo 'export OPENAI_API_KEY="sk-proj-..."' >> ~/.zshrc
+     source ~/.zshrc
+     ```
+
+     **Option C: Docker Compose env_file**:
+     ```yaml
+     # In docker-compose-dev.yaml
+     services:
+       langgraph:
+         env_file:
+           - ../../.env  # Loads variables from .env file
+       gateway:
+         env_file:
+           - ../../.env
+     ```
+
+  4. **Verify variable is loaded in Python**:
+     ```bash
+     cd backend
+     uv run python -c "import os; print(os.getenv('OPENAI_API_KEY')[:10])"
+     # Should output first 10 chars of your key: sk-proj-...
+     ```
+</Accordion>
+
+<Accordion title="Invalid API key error from provider">
+  **Problem**: `401 Unauthorized` or `Invalid API key` from OpenAI, Anthropic, etc.
+
+  **Solution**:
+
+  1. **Verify API key is valid**:
+
+     **OpenAI**:
+     ```bash
+     curl https://api.openai.com/v1/models \
+       -H "Authorization: Bearer $OPENAI_API_KEY"
+     # Should return list of models, not 401 error
+     ```
+
+     **Anthropic**:
+     ```bash
+     curl https://api.anthropic.com/v1/messages \
+       -H "x-api-key: $ANTHROPIC_API_KEY" \
+       -H "anthropic-version: 2023-06-01" \
+       -H "content-type: application/json" \
+       -d '{"model":"claude-3-5-sonnet-20241022","max_tokens":1024,"messages":[{"role":"user","content":"test"}]}'
+     # Should return message, not error
+     ```
+
+  2. **Common API key issues**:
+
+     - **Expired key**: Generate new key from provider dashboard
+     - **Wrong project**: Ensure key has access to the model
+     - **Rate limited**: Check provider dashboard for limits
+     - **Trailing spaces**: Trim whitespace in .env file
+
+  3. **Regenerate API key**:
+
+     - **OpenAI**: https://platform.openai.com/api-keys
+     - **Anthropic**: https://console.anthropic.com/settings/keys
+     - **DeepSeek**: https://platform.deepseek.com/api_keys
+     - **Google**: https://aistudio.google.com/app/apikey
+
+  4. **Check key format**:
+     - OpenAI: `sk-proj-...` (project keys) or `sk-...` (legacy)
+     - Anthropic: `sk-ant-...`
+     - DeepSeek: `sk-...`
+     - Google: Usually starts with `AI...`
+
+  5. **Test with minimal config**:
+     ```bash
+     cd backend
+     uv run python << 'EOF'
+     import os
+     from langchain_openai import ChatOpenAI
+
+     llm = ChatOpenAI(
+         model="gpt-4",
+         api_key=os.getenv("OPENAI_API_KEY")
+     )
+     result = llm.invoke("Hello")
+     print(result.content)
+     EOF
+     # Should print response, not error
+     ```
+</Accordion>
+
+<Accordion title="API key works in curl but not in DeerFlow">
+  **Problem**: API key works when tested directly but fails in DeerFlow.
+
+  **Solution**:
+
+  1. **Check environment isolation**:
+     ```bash
+     # Test in exact same environment as DeerFlow
+     cd backend
+     uv run python -c "import os; print('Key:', os.getenv('OPENAI_API_KEY')[:10])"
+     # Should show key prefix
+     ```
+
+  2. **For Docker deployment**:
+     ```bash
+     # Check if environment variable is passed to container
+     docker exec deer-flow-langgraph env | grep OPENAI_API_KEY
+     # Should show the key (first few chars)
+
+     # If not present, add to docker-compose:
+     # services:
+     #   langgraph:
+     #     environment:
+     #       - OPENAI_API_KEY=${OPENAI_API_KEY}
+     ```
+
+  3. **Verify config resolution**:
+     ```bash
+     cd backend
+     uv run python << 'EOF'
+     from src.config import get_app_config
+     config = get_app_config()
+     print("First model API key (first 10 chars):", config.models[0].api_key[:10])
+     EOF
+     # Should show "sk-proj-..." not "$OPENAI_..."
+     ```
+
+  4. **Check for config typos**:
+     ```yaml
+     models:
+       - name: gpt-4
+         api_key: $OPENAI_API_KEY  # ✅ Correct field name
+         # NOT: apiKey: $OPENAI_API_KEY  # ❌ Wrong: camelCase
+         # NOT: key: $OPENAI_API_KEY     # ❌ Wrong: field name
+     ```
+</Accordion>
+
+## Model Loading Errors
+
+<Accordion title="Provider module not found (ImportError)">
+  **Problem**: `ModuleNotFoundError: No module named 'langchain_openai'` or similar.
+
+  **Solution**:
+
+  DeerFlow uses LangChain provider packages. Each provider must be installed separately.
+
+  1. **Install required provider**:
+     ```bash
+     cd backend
+
+     # OpenAI (GPT models)
+     uv add langchain-openai
+
+     # Anthropic (Claude models)
+     uv add langchain-anthropic
+
+     # Google (Gemini models)
+     uv add langchain-google-genai
+
+     # DeepSeek
+     uv add langchain-deepseek
+
+     # Cohere
+     uv add langchain-cohere
+
+     # Groq
+     uv add langchain-groq
+
+     # Any other LangChain provider:
+     uv add langchain-<provider-name>
+     ```
+
+  2. **Verify installation**:
+     ```bash
+     uv run python -c "import langchain_openai; print('OK')"
+     uv run python -c "from langchain_openai import ChatOpenAI; print('OK')"
+     ```
+
+  3. **For custom/patched models**:
+     ```yaml
+     # If using DeerFlow's patched models (included in source)
+     models:
+       - name: deepseek-v3
+         use: src.models.patched_deepseek:PatchedChatDeepSeek
+         # No additional install needed
+     ```
+
+  4. **Common provider packages**:
+     
+     | Provider | Package | Import |
+     |----------|---------|--------|
+     | OpenAI | `langchain-openai` | `langchain_openai:ChatOpenAI` |
+     | Anthropic | `langchain-anthropic` | `langchain_anthropic:ChatAnthropic` |
+     | Google | `langchain-google-genai` | `langchain_google_genai:ChatGoogleGenerativeAI` |
+     | DeepSeek | `langchain-deepseek` | `langchain_deepseek:ChatDeepSeek` |
+     | Azure OpenAI | `langchain-openai` | `langchain_openai:AzureChatOpenAI` |
+</Accordion>
+
+<Accordion title="Model name not found or invalid model ID">
+  **Problem**: `Model 'gpt-5' not found` or `InvalidRequestError: model not supported`.
+
+  **Solution**:
+
+  1. **Check model ID is correct for provider**:
+
+     **OpenAI models**:
+     ```yaml
+     models:
+       - name: gpt-4-turbo
+         use: langchain_openai:ChatOpenAI
+         model: gpt-4-turbo-preview  # ✅ Correct: Official model ID
+         # NOT: model: gpt-4-turbo  # ❌ May not exist
+     ```
+
+     Valid OpenAI models (as of 2024):
+     - `gpt-4-turbo-preview`
+     - `gpt-4`
+     - `gpt-4-32k`
+     - `gpt-3.5-turbo`
+
+     **Anthropic models**:
+     ```yaml
+     models:
+       - name: claude-sonnet
+         use: langchain_anthropic:ChatAnthropic
+         model: claude-3-5-sonnet-20241022  # ✅ Correct: Full version
+         # NOT: model: claude-3-sonnet  # ❌ Wrong: Missing version
+     ```
+
+  2. **Verify model is available in your account**:
+     ```bash
+     # OpenAI
+     curl https://api.openai.com/v1/models \
+       -H "Authorization: Bearer $OPENAI_API_KEY" | jq '.data[].id'
+
+     # Should list available models including your desired one
+     ```
+
+  3. **Check for typos**:
+     ```yaml
+     # Common typos:
+     model: gpt-4-turob  # ❌ Wrong: typo
+     model: claude-3-5-sonet  # ❌ Wrong: missing 'n'
+     model: gemini-2.0-pro  # ❌ Wrong: version number
+     ```
+
+  4. **For OpenAI-compatible APIs (Novita, Ollama, etc.)**:
+     ```yaml
+     models:
+       - name: novita-deepseek
+         use: langchain_openai:ChatOpenAI
+         model: deepseek/deepseek-v3.2  # Model ID from provider's docs
+         base_url: https://api.novita.ai/openai
+         api_key: $NOVITA_API_KEY
+     ```
+
+  5. **Test model ID directly**:
+     ```bash
+     cd backend
+     uv run python << 'EOF'
+     from langchain_openai import ChatOpenAI
+     llm = ChatOpenAI(model="gpt-4", api_key="$OPENAI_API_KEY")
+     result = llm.invoke("test")
+     print(result.content)
+     EOF
+     ```
+</Accordion>
+
+<Accordion title="Model features not working (vision, thinking, etc.)">
+  **Problem**: Model doesn't support features like image understanding or extended thinking.
+
+  **Solution**:
+
+  1. **Enable vision support**:
+     ```yaml
+     models:
+       - name: gpt-4
+         use: langchain_openai:ChatOpenAI
+         model: gpt-4
+         supports_vision: true  # ✅ Enable vision
+         # Adds view_image tool to agent
+     ```
+
+     Models with vision support:
+     - OpenAI: `gpt-4-turbo`, `gpt-4o`, `gpt-4-vision-preview`
+     - Anthropic: `claude-3-5-sonnet-20241022`, `claude-3-opus-20240229`
+     - Google: `gemini-2.5-pro`, `gemini-1.5-pro`
+
+  2. **Enable thinking/reasoning mode**:
+     ```yaml
+     models:
+       - name: deepseek-reasoner
+         use: src.models.patched_deepseek:PatchedChatDeepSeek
+         model: deepseek-reasoner
+         supports_thinking: true  # ✅ Enable thinking
+         when_thinking_enabled:
+           extra_body:
+             thinking:
+               type: enabled
+     ```
+
+  3. **Configure per-model extended thinking**:
+     ```yaml
+     models:
+       # DeepSeek style (extra_body.thinking)
+       - name: deepseek-v3
+         supports_thinking: true
+         when_thinking_enabled:
+           extra_body:
+             thinking:
+               type: enabled
+
+       # OpenAI style (reasoning_effort) - for o1 models
+       - name: o1-preview
+         supports_thinking: true
+         when_thinking_enabled:
+           reasoning_effort: high  # or medium/low
+     ```
+
+  4. **Verify model actually supports the feature**:
+     ```bash
+     # Check provider documentation
+     # Not all models support vision or thinking modes
+     
+     # Common issues:
+     # - gpt-3.5-turbo: No vision support
+     # - claude-instant: No vision support
+     # - Most models: No native thinking mode (except DeepSeek reasoner, O1)
+     ```
+</Accordion>
+
+## Provider Configuration Problems
+
+<Accordion title="OpenAI-compatible API (Novita, Ollama, etc.) not working">
+  **Problem**: Custom OpenAI-compatible endpoint fails with authentication or model errors.
+
+  **Solution**:
+
+  1. **Use ChatOpenAI with base_url**:
+     ```yaml
+     models:
+       # Novita example
+       - name: novita-deepseek
+         display_name: Novita DeepSeek V3.2
+         use: langchain_openai:ChatOpenAI  # ✅ Use OpenAI class
+         model: deepseek/deepseek-v3.2  # Provider's model ID
+         api_key: $NOVITA_API_KEY
+         base_url: https://api.novita.ai/openai  # Custom endpoint
+
+       # Ollama local example
+       - name: ollama-llama
+         use: langchain_openai:ChatOpenAI
+         model: llama3.2
+         base_url: http://localhost:11434/v1
+         api_key: ollama  # Ollama ignores this, but required by LangChain
+     ```
+
+  2. **Test endpoint connectivity**:
+     ```bash
+     # Test custom endpoint
+     curl -X POST https://api.novita.ai/openai/v1/chat/completions \
+       -H "Authorization: Bearer $NOVITA_API_KEY" \
+       -H "Content-Type: application/json" \
+       -d '{
+         "model": "deepseek/deepseek-v3.2",
+         "messages": [{"role": "user", "content": "test"}],
+         "max_tokens": 10
+       }'
+     ```
+
+  3. **Common provider configurations**:
+
+     **Ollama (local)**:
+     ```yaml
+     models:
+       - name: ollama-llama
+         use: langchain_openai:ChatOpenAI
+         model: llama3.2
+         base_url: http://localhost:11434/v1
+         api_key: ollama
+     ```
+
+     **LM Studio (local)**:
+     ```yaml
+     models:
+       - name: lmstudio-local
+         use: langchain_openai:ChatOpenAI
+         model: local-model
+         base_url: http://localhost:1234/v1
+         api_key: lm-studio
+     ```
+
+     **vLLM server**:
+     ```yaml
+     models:
+       - name: vllm-server
+         use: langchain_openai:ChatOpenAI
+         model: your-model-name
+         base_url: http://your-vllm-server:8000/v1
+         api_key: token-if-required
+     ```
+
+  4. **Check if endpoint requires /v1 suffix**:
+     ```yaml
+     # Some providers need /v1, others don't
+     base_url: https://api.example.com/openai  # May need /v1
+     base_url: https://api.example.com/openai/v1  # Already includes /v1
+     ```
+</Accordion>
+
+<Accordion title="Azure OpenAI configuration issues">
+  **Problem**: Azure OpenAI deployment fails with endpoint or authentication errors.
+
+  **Solution**:
+
+  1. **Use AzureChatOpenAI class**:
+     ```yaml
+     models:
+       - name: azure-gpt4
+         display_name: Azure GPT-4
+         use: langchain_openai:AzureChatOpenAI
+         azure_deployment: your-deployment-name  # Not 'model'
+         api_key: $AZURE_OPENAI_API_KEY
+         azure_endpoint: https://your-resource.openai.azure.com
+         api_version: "2024-02-15-preview"
+     ```
+
+  2. **Get values from Azure portal**:
+     - **azure_deployment**: Your deployment name (e.g., "gpt-4-deployment")
+     - **azure_endpoint**: Your resource endpoint
+     - **api_key**: Keys and Endpoint → KEY 1 or KEY 2
+     - **api_version**: Use latest from Azure docs
+
+  3. **Test Azure endpoint**:
+     ```bash
+     curl -X POST "https://your-resource.openai.azure.com/openai/deployments/your-deployment-name/chat/completions?api-version=2024-02-15-preview" \
+       -H "api-key: $AZURE_OPENAI_API_KEY" \
+       -H "Content-Type: application/json" \
+       -d '{
+         "messages": [{"role": "user", "content": "test"}],
+         "max_tokens": 10
+       }'
+     ```
+
+  4. **Common Azure mistakes**:
+     ```yaml
+     # ❌ Wrong: Using 'model' field
+     model: gpt-4
+
+     # ✅ Correct: Using 'azure_deployment'
+     azure_deployment: my-gpt4-deployment
+
+     # ❌ Wrong: Missing api_version
+     # ✅ Correct: Include api_version
+     api_version: "2024-02-15-preview"
+
+     # ❌ Wrong: OpenAI endpoint
+     base_url: https://api.openai.com
+
+     # ✅ Correct: Azure endpoint
+     azure_endpoint: https://your-resource.openai.azure.com
+     ```
+</Accordion>
+
+<Accordion title="Rate limiting or quota errors">
+  **Problem**: `429 Too Many Requests` or `Quota exceeded` errors.
+
+  **Solution**:
+
+  1. **Check rate limits in provider dashboard**:
+     - OpenAI: https://platform.openai.com/account/limits
+     - Anthropic: https://console.anthropic.com/settings/limits
+     - DeepSeek: https://platform.deepseek.com/usage
+
+  2. **Upgrade account tier**:
+     - Many providers have higher limits for paid tiers
+     - OpenAI: Increase from free tier to paid
+     - Check if you need to add payment method
+
+  3. **Implement retry logic (automatic in LangChain)**:
+     ```yaml
+     models:
+       - name: gpt-4
+         use: langchain_openai:ChatOpenAI
+         model: gpt-4
+         max_retries: 3  # Retry on rate limit
+         timeout: 60  # Timeout in seconds
+     ```
+
+  4. **Use multiple models as fallback**:
+     ```yaml
+     # Configure multiple models
+     models:
+       - name: gpt-4-primary
+         use: langchain_openai:ChatOpenAI
+         model: gpt-4
+       - name: gpt-4-turbo-fallback
+         use: langchain_openai:ChatOpenAI
+         model: gpt-4-turbo-preview
+       - name: claude-fallback
+         use: langchain_anthropic:ChatAnthropic
+         model: claude-3-5-sonnet-20241022
+     ```
+
+  5. **Monitor usage**:
+     ```bash
+     # Check OpenAI usage
+     curl https://api.openai.com/v1/usage \
+       -H "Authorization: Bearer $OPENAI_API_KEY"
+     ```
+</Accordion>
+
+<Accordion title="Model returns empty or truncated responses">
+  **Problem**: Model responses are cut off or empty.
+
+  **Solution**:
+
+  1. **Increase max_tokens**:
+     ```yaml
+     models:
+       - name: gpt-4
+         max_tokens: 4096  # ✅ Increase if responses truncated
+         # Default may be too low (e.g., 256)
+     ```
+
+  2. **Check model's actual limits**:
+     - GPT-4: 8192 output tokens max
+     - GPT-4 Turbo: 4096 output tokens max
+     - Claude 3.5 Sonnet: 8192 output tokens max
+     - DeepSeek V3: 8192 output tokens max
+
+  3. **Set appropriate temperature**:
+     ```yaml
+     models:
+       - name: gpt-4
+         temperature: 0.7  # ✅ Balanced
+         # temperature: 0.0  # More deterministic, may be too restrictive
+         # temperature: 1.0  # More creative, may be too random
+     ```
+
+  4. **Test model directly**:
+     ```bash
+     cd backend
+     uv run python << 'EOF'
+     from langchain_openai import ChatOpenAI
+     llm = ChatOpenAI(model="gpt-4", max_tokens=4096)
+     result = llm.invoke("Write a 500 word essay on AI")
+     print(f"Response length: {len(result.content)} chars")
+     print(result.content[:200])
+     EOF
+     ```
+</Accordion>
+
+## Next Steps
+
+- [Common Issues](/troubleshooting/common-issues) - General troubleshooting
+- [Performance Optimization](/troubleshooting/performance) - Improve model performance
+- [Configuration Guide](/configuration/config-yaml) - Complete model configuration reference

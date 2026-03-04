@@ -1,0 +1,317 @@
+---
+title: Sandbox Tools
+description: File system and command execution tools for the agent sandbox environment
+---
+
+## Overview
+
+Sandbox tools provide file system operations and command execution capabilities in a secure, isolated environment. All operations use absolute paths and support both local and remote sandbox providers.
+
+## Virtual Path Mapping
+
+The sandbox uses virtual paths that map to thread-specific directories:
+
+- `/mnt/user-data/workspace/*` → Thread workspace directory
+- `/mnt/user-data/uploads/*` → Thread uploads directory
+- `/mnt/user-data/outputs/*` → Thread outputs directory
+
+For local sandboxes, these virtual paths are automatically replaced with actual filesystem paths.
+
+---
+
+## bash
+
+Execute a bash command in a Linux environment.
+
+### Parameters
+
+<ParamField path="description" type="str" required>
+  Explain why you are running this command in short words. **ALWAYS PROVIDE THIS PARAMETER FIRST.**
+</ParamField>
+
+<ParamField path="command" type="str" required>
+  The bash command to execute. Always use absolute paths for files and directories.
+</ParamField>
+
+### Usage
+
+- Use `python` to run Python code
+- Use `pip install` to install Python packages
+- Always use absolute paths in commands
+
+### Examples
+
+```python
+# Run a Python script
+bash(
+    description="Run analysis script",
+    command="python /mnt/user-data/workspace/analyze.py"
+)
+
+# Install dependencies
+bash(
+    description="Install required packages",
+    command="pip install pandas numpy matplotlib"
+)
+
+# Git operations
+bash(
+    description="Commit changes",
+    command="cd /mnt/user-data/workspace && git add . && git commit -m 'Update analysis'"
+)
+
+# Build and compile
+bash(
+    description="Build TypeScript project",
+    command="cd /mnt/user-data/workspace && npm run build"
+)
+```
+
+### Return Type
+
+Returns a string containing:
+- Command stdout/stderr output
+- Error messages if the command fails
+
+---
+
+## ls
+
+List the contents of a directory up to 2 levels deep in tree format.
+
+### Parameters
+
+<ParamField path="description" type="str" required>
+  Explain why you are listing this directory in short words. **ALWAYS PROVIDE THIS PARAMETER FIRST.**
+</ParamField>
+
+<ParamField path="path" type="str" required>
+  The **absolute** path to the directory to list.
+</ParamField>
+
+### Examples
+
+```python
+# List workspace contents
+ls(
+    description="Check project structure",
+    path="/mnt/user-data/workspace"
+)
+
+# List output files
+ls(
+    description="View generated files",
+    path="/mnt/user-data/outputs"
+)
+```
+
+### Return Type
+
+Returns a string containing:
+- Tree-formatted directory listing (up to 2 levels deep)
+- `"(empty)"` if directory is empty
+- Error message if directory not found or permission denied
+
+---
+
+## read_file
+
+Read the contents of a text file. Use this to examine source code, configuration files, logs, or any text-based file.
+
+### Parameters
+
+<ParamField path="description" type="str" required>
+  Explain why you are reading this file in short words. **ALWAYS PROVIDE THIS PARAMETER FIRST.**
+</ParamField>
+
+<ParamField path="path" type="str" required>
+  The **absolute** path to the file to read.
+</ParamField>
+
+<ParamField path="start_line" type="int" optional>
+  Optional starting line number (1-indexed, inclusive). Use with `end_line` to read a specific range.
+</ParamField>
+
+<ParamField path="end_line" type="int" optional>
+  Optional ending line number (1-indexed, inclusive). Use with `start_line` to read a specific range.
+</ParamField>
+
+### Examples
+
+```python
+# Read entire file
+read_file(
+    description="Check configuration",
+    path="/mnt/user-data/workspace/config.yaml"
+)
+
+# Read specific line range
+read_file(
+    description="Read function definition",
+    path="/mnt/user-data/workspace/utils.py",
+    start_line=10,
+    end_line=25
+)
+
+# Read log file
+read_file(
+    description="Check error logs",
+    path="/mnt/user-data/workspace/app.log"
+)
+```
+
+### Return Type
+
+Returns a string containing:
+- File contents (full or specified line range)
+- `"(empty)"` if file is empty
+- Error messages for missing files, permission issues, or invalid paths
+
+---
+
+## write_file
+
+Write text content to a file.
+
+### Parameters
+
+<ParamField path="description" type="str" required>
+  Explain why you are writing to this file in short words. **ALWAYS PROVIDE THIS PARAMETER FIRST.**
+</ParamField>
+
+<ParamField path="path" type="str" required>
+  The **absolute** path to the file to write to. **ALWAYS PROVIDE THIS PARAMETER SECOND.**
+</ParamField>
+
+<ParamField path="content" type="str" required>
+  The content to write to the file. **ALWAYS PROVIDE THIS PARAMETER THIRD.**
+</ParamField>
+
+<ParamField path="append" type="bool" optional>
+  Whether to append to the file instead of overwriting. Default is `False`.
+</ParamField>
+
+### Examples
+
+```python
+# Create a new file
+write_file(
+    description="Create configuration file",
+    path="/mnt/user-data/workspace/config.json",
+    content='{"api_key": "xxx", "timeout": 30}'
+)
+
+# Write analysis results
+write_file(
+    description="Save analysis results",
+    path="/mnt/user-data/outputs/results.txt",
+    content="Analysis complete. Found 42 anomalies.\nProcessed 1000 records."
+)
+
+# Append to log file
+write_file(
+    description="Append to log",
+    path="/mnt/user-data/workspace/app.log",
+    content="[2024-01-15] Process completed successfully\n",
+    append=True
+)
+```
+
+### Return Type
+
+Returns:
+- `"OK"` on success
+- Error message on failure (permission denied, invalid path, etc.)
+
+---
+
+## str_replace
+
+Replace a substring in a file with another substring.
+
+### Parameters
+
+<ParamField path="description" type="str" required>
+  Explain why you are replacing the substring in short words. **ALWAYS PROVIDE THIS PARAMETER FIRST.**
+</ParamField>
+
+<ParamField path="path" type="str" required>
+  The **absolute** path to the file to replace the substring in. **ALWAYS PROVIDE THIS PARAMETER SECOND.**
+</ParamField>
+
+<ParamField path="old_str" type="str" required>
+  The substring to replace. **ALWAYS PROVIDE THIS PARAMETER THIRD.**
+</ParamField>
+
+<ParamField path="new_str" type="str" required>
+  The new substring. **ALWAYS PROVIDE THIS PARAMETER FOURTH.**
+</ParamField>
+
+<ParamField path="replace_all" type="bool" optional>
+  Whether to replace all occurrences of the substring. If `False` (default), the substring must appear **exactly once** in the file.
+</ParamField>
+
+### Important Notes
+
+- If `replace_all` is `False` (default), the tool expects the substring to appear exactly once
+- Returns an error if the substring is not found or appears multiple times when `replace_all=False`
+
+### Examples
+
+```python
+# Replace API endpoint (single occurrence)
+str_replace(
+    description="Update API endpoint",
+    path="/mnt/user-data/workspace/config.py",
+    old_str='API_URL = "http://localhost:8000"',
+    new_str='API_URL = "https://api.production.com"'
+)
+
+# Replace all occurrences
+str_replace(
+    description="Update variable name",
+    path="/mnt/user-data/workspace/script.py",
+    old_str="oldVariableName",
+    new_str="newVariableName",
+    replace_all=True
+)
+
+# Update configuration value
+str_replace(
+    description="Enable debug mode",
+    path="/mnt/user-data/workspace/.env",
+    old_str="DEBUG=false",
+    new_str="DEBUG=true"
+)
+```
+
+### Return Type
+
+Returns:
+- `"OK"` on success
+- Error message if:
+  - String to replace is not found
+  - File not found
+  - Permission denied
+  - Unexpected errors occur
+
+---
+
+## Error Handling
+
+All sandbox tools include comprehensive error handling:
+
+- **SandboxError**: Caught and returned as formatted error strings
+- **FileNotFoundError**: Specific error message with path
+- **PermissionError**: Permission denied errors with context
+- **IsADirectoryError**: When path is directory but file expected
+- **Generic Exception**: Unexpected errors with type and message
+
+## Lazy Initialization
+
+Sandbox tools support lazy initialization:
+
+- Sandbox is acquired on first tool use
+- Thread directories are created automatically
+- State is persisted across tool calls
+- Thread-safety guaranteed by provider locking

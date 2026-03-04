@@ -1,0 +1,647 @@
+---
+title: Skills & MCP Configuration
+description: Configure skills and Model Context Protocol (MCP) servers for extended agent capabilities
+---
+
+DeerFlow supports two types of extensions: **Skills** (specialized agent workflows) and **MCP Servers** (external context providers). Both are configured through `config.yaml` and `extensions_config.json`.
+
+## Configuration Files
+
+<CardGroup cols={2}>
+  <Card title="config.yaml" icon="gear">
+    **Skills Directory**: Configure where skills are located and how they're mounted in sandboxes
+  </Card>
+  <Card title="extensions_config.json" icon="file-code">
+    **Enable/Disable State**: Control which skills and MCP servers are active
+  </Card>
+</CardGroup>
+
+## Skills Configuration
+
+Skills are specialized workflows and prompts that enhance agent capabilities for specific tasks.
+
+### Directory Configuration (config.yaml)
+
+```yaml config.yaml
+skills:
+  # Path to skills directory on the host
+  # Relative paths are resolved from current working directory
+  # If not specified, defaults to ../skills relative to backend directory
+  path: /absolute/path/to/custom/skills
+  
+  # Path where skills are mounted in the sandbox container
+  # This is used by the agent to access skills in both local and Docker sandbox
+  container_path: /mnt/skills
+```
+
+<ParamField path="path" type="string">
+  Path to the skills directory on the host machine.
+  
+  - Can be absolute (`/home/user/skills`) or relative (`../skills`)
+  - Relative paths are resolved from the current working directory
+  - If not specified, defaults to `../skills` relative to the backend directory
+</ParamField>
+
+<ParamField path="container_path" type="string" default="/mnt/skills">
+  Path where skills are mounted inside the sandbox container.
+  
+  The agent uses this path to access skills in both local and Docker sandboxes.
+</ParamField>
+
+### Skills Directory Structure
+
+```
+skills/
+├── public/              # Built-in skills
+│   ├── pdf-processing/
+│   │   ├── SKILL.md     # Skill definition
+│   │   └── scripts/     # Helper scripts
+│   └── frontend-design/
+│       └── SKILL.md
+└── custom/              # User-defined skills
+    └── my-skill/
+        └── SKILL.md
+```
+
+### Enable/Disable Skills (extensions_config.json)
+
+Control which skills are active:
+
+```json extensions_config.json
+{
+  "skills": {
+    "pdf-processing": {
+      "enabled": true
+    },
+    "frontend-design": {
+      "enabled": true
+    },
+    "my-custom-skill": {
+      "enabled": false  // Disabled
+    }
+  }
+}
+```
+
+<Info>
+  **Default Behavior**: If a skill is not listed in `extensions_config.json`, it's **enabled by default** for `public` and `custom` categories.
+</Info>
+
+### Programmatic Access
+
+Check if a skill is enabled:
+
+```python
+from src.config.extensions_config import get_extensions_config
+
+config = get_extensions_config()
+
+# Check if skill is enabled
+if config.is_skill_enabled("pdf-processing", "public"):
+    print("PDF processing skill is enabled")
+
+# Get skill container path
+from src.config.app_config import get_app_config
+app_config = get_app_config()
+path = app_config.skills.get_skill_container_path(
+    skill_name="pdf-processing",
+    category="public"
+)
+print(f"Skill path in container: {path}")
+# Output: /mnt/skills/public/pdf-processing
+```
+
+## MCP (Model Context Protocol) Configuration
+
+MCP servers provide external context, tools, and data sources to agents. DeerFlow supports three transport types:
+
+<CardGroup cols={3}>
+  <Card title="stdio" icon="terminal">
+    Local process communication via stdin/stdout
+  </Card>
+  <Card title="HTTP" icon="globe">
+    RESTful HTTP communication
+  </Card>
+  <Card title="SSE" icon="signal-stream">
+    Server-Sent Events for streaming
+  </Card>
+</CardGroup>
+
+### Configuration (extensions_config.json)
+
+All MCP servers are configured in `extensions_config.json`:
+
+```json extensions_config.json
+{
+  "mcpServers": {
+    "filesystem": {
+      "enabled": true,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"],
+      "env": {},
+      "description": "Provides filesystem access within allowed directories"
+    },
+    "github": {
+      "enabled": true,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": "$GITHUB_TOKEN"
+      },
+      "description": "GitHub MCP server for repository operations"
+    },
+    "postgres": {
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/mydb"],
+      "description": "PostgreSQL database access"
+    }
+  }
+}
+```
+
+### Common Fields
+
+<ParamField path="enabled" type="boolean" default="true" required>
+  Whether this MCP server is active. Set to `false` to temporarily disable.
+</ParamField>
+
+<ParamField path="type" type="string" required>
+  Transport protocol: `stdio`, `http`, or `sse`
+</ParamField>
+
+<ParamField path="description" type="string">
+  Human-readable description of what this MCP server provides
+</ParamField>
+
+### stdio Transport
+
+For local processes that communicate via stdin/stdout:
+
+```json
+{
+  "my-stdio-server": {
+    "enabled": true,
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"],
+    "env": {
+      "API_KEY": "$MY_API_KEY"
+    },
+    "description": "Local filesystem access"
+  }
+}
+```
+
+<ParamField path="command" type="string" required>
+  Executable command to start the MCP server (e.g., `npx`, `python`, `/usr/bin/my-server`)
+</ParamField>
+
+<ParamField path="args" type="array">
+  Command-line arguments passed to the command
+</ParamField>
+
+<ParamField path="env" type="object">
+  Environment variables for the MCP server process.
+  
+  Values starting with `$` are resolved from the host environment:
+  ```json
+  "env": {
+    "API_KEY": "$MY_API_KEY",  // Resolved from host
+    "DEBUG": "true"            // Literal value
+  }
+  ```
+</ParamField>
+
+### HTTP Transport
+
+For RESTful HTTP-based MCP servers:
+
+```json
+{
+  "my-http-server": {
+    "enabled": true,
+    "type": "http",
+    "url": "https://api.example.com/mcp",
+    "headers": {
+      "Authorization": "Bearer $API_TOKEN",
+      "X-Custom-Header": "value"
+    },
+    "oauth": {
+      "enabled": true,
+      "token_url": "https://auth.example.com/oauth/token",
+      "grant_type": "client_credentials",
+      "client_id": "$MCP_OAUTH_CLIENT_ID",
+      "client_secret": "$MCP_OAUTH_CLIENT_SECRET"
+    },
+    "description": "External HTTP MCP server"
+  }
+}
+```
+
+<ParamField path="url" type="string" required>
+  Base URL of the MCP server
+</ParamField>
+
+<ParamField path="headers" type="object">
+  HTTP headers sent with requests. Supports environment variable resolution with `$VAR_NAME`.
+</ParamField>
+
+<ParamField path="oauth" type="object">
+  OAuth configuration for automatic token management. See [OAuth Configuration](#oauth-configuration) below.
+</ParamField>
+
+### SSE (Server-Sent Events) Transport
+
+For streaming MCP servers using Server-Sent Events:
+
+```json
+{
+  "my-sse-server": {
+    "enabled": true,
+    "type": "sse",
+    "url": "https://api.example.com/mcp",
+    "headers": {
+      "Authorization": "Bearer $API_TOKEN"
+    },
+    "oauth": {
+      "enabled": true,
+      "token_url": "https://auth.example.com/oauth/token",
+      "grant_type": "client_credentials",
+      "client_id": "$MCP_OAUTH_CLIENT_ID",
+      "client_secret": "$MCP_OAUTH_CLIENT_SECRET",
+      "scope": "mcp.read mcp.write",
+      "audience": "https://api.example.com",
+      "refresh_skew_seconds": 60
+    },
+    "description": "Streaming SSE MCP server"
+  }
+}
+```
+
+SSE servers use the same fields as HTTP servers.
+
+## OAuth Configuration
+
+For HTTP and SSE transports, DeerFlow can automatically manage OAuth tokens:
+
+```json
+{
+  "oauth": {
+    "enabled": true,
+    "token_url": "https://auth.example.com/oauth/token",
+    "grant_type": "client_credentials",
+    "client_id": "$MCP_OAUTH_CLIENT_ID",
+    "client_secret": "$MCP_OAUTH_CLIENT_SECRET",
+    "refresh_token": "$MCP_REFRESH_TOKEN",
+    "scope": "mcp.read mcp.write",
+    "audience": "https://api.example.com",
+    "token_field": "access_token",
+    "token_type_field": "token_type",
+    "expires_in_field": "expires_in",
+    "default_token_type": "Bearer",
+    "refresh_skew_seconds": 60,
+    "extra_token_params": {
+      "resource": "https://api.example.com"
+    }
+  }
+}
+```
+
+<ParamField path="oauth.enabled" type="boolean" default="true">
+  Enable OAuth token management
+</ParamField>
+
+<ParamField path="oauth.token_url" type="string" required>
+  OAuth token endpoint URL
+</ParamField>
+
+<ParamField path="oauth.grant_type" type="string" default="client_credentials">
+  OAuth grant type: `client_credentials` or `refresh_token`
+</ParamField>
+
+<ParamField path="oauth.client_id" type="string">
+  OAuth client ID (supports `$VAR_NAME` for environment variables)
+</ParamField>
+
+<ParamField path="oauth.client_secret" type="string">
+  OAuth client secret (supports `$VAR_NAME`)
+</ParamField>
+
+<ParamField path="oauth.refresh_token" type="string">
+  OAuth refresh token (for `refresh_token` grant type, supports `$VAR_NAME`)
+</ParamField>
+
+<ParamField path="oauth.scope" type="string">
+  OAuth scope (space-separated list of permissions)
+</ParamField>
+
+<ParamField path="oauth.audience" type="string">
+  OAuth audience (provider-specific, e.g., Auth0)
+</ParamField>
+
+<ParamField path="oauth.token_field" type="string" default="access_token">
+  Field name containing the access token in the token response
+</ParamField>
+
+<ParamField path="oauth.token_type_field" type="string" default="token_type">
+  Field name containing the token type in the token response
+</ParamField>
+
+<ParamField path="oauth.expires_in_field" type="string" default="expires_in">
+  Field name containing the expiry duration (in seconds) in the token response
+</ParamField>
+
+<ParamField path="oauth.default_token_type" type="string" default="Bearer">
+  Default token type when missing in the token response
+</ParamField>
+
+<ParamField path="oauth.refresh_skew_seconds" type="integer" default="60">
+  Refresh the token this many seconds **before** expiry to avoid race conditions
+</ParamField>
+
+<ParamField path="oauth.extra_token_params" type="object">
+  Additional form parameters sent to the token endpoint
+</ParamField>
+
+### OAuth Grant Types
+
+<Tabs>
+  <Tab title="Client Credentials">
+    Most common for server-to-server authentication:
+    
+    ```json
+    {
+      "oauth": {
+        "enabled": true,
+        "token_url": "https://auth.example.com/oauth/token",
+        "grant_type": "client_credentials",
+        "client_id": "$CLIENT_ID",
+        "client_secret": "$CLIENT_SECRET",
+        "scope": "api.read api.write"
+      }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Refresh Token">
+    For long-lived access using a refresh token:
+    
+    ```json
+    {
+      "oauth": {
+        "enabled": true,
+        "token_url": "https://auth.example.com/oauth/token",
+        "grant_type": "refresh_token",
+        "client_id": "$CLIENT_ID",
+        "client_secret": "$CLIENT_SECRET",
+        "refresh_token": "$REFRESH_TOKEN"
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Environment Variable Resolution
+
+Both `env` fields (for stdio) and OAuth configuration support environment variable resolution:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "type": "stdio",
+      "env": {
+        "GITHUB_TOKEN": "$GITHUB_TOKEN"  // Resolved from host environment
+      }
+    },
+    "my-api": {
+      "type": "http",
+      "headers": {
+        "Authorization": "Bearer $API_KEY"  // Resolved from host environment
+      },
+      "oauth": {
+        "client_id": "$OAUTH_CLIENT_ID",     // Resolved from host environment
+        "client_secret": "$OAUTH_SECRET"     // Resolved from host environment
+      }
+    }
+  }
+}
+```
+
+Set these variables in your environment:
+
+```bash
+export GITHUB_TOKEN="ghp_..."
+export API_KEY="key_..."
+export OAUTH_CLIENT_ID="client_..."
+export OAUTH_SECRET="secret_..."
+```
+
+<Warning>
+  If a referenced environment variable is not set, DeerFlow will raise a `ValueError` during configuration loading.
+</Warning>
+
+## Programmatic Access
+
+```python
+from src.config.extensions_config import get_extensions_config
+
+config = get_extensions_config()
+
+# Get all enabled MCP servers
+enabled_servers = config.get_enabled_mcp_servers()
+for name, server_config in enabled_servers.items():
+    print(f"Server: {name}")
+    print(f"  Type: {server_config.type}")
+    print(f"  Description: {server_config.description}")
+
+# Get specific MCP server
+if "github" in config.mcp_servers:
+    github = config.mcp_servers["github"]
+    if github.enabled:
+        print(f"GitHub MCP: {github.command} {' '.join(github.args)}")
+
+# Check skill status
+if config.is_skill_enabled("pdf-processing", "public"):
+    print("PDF processing skill is enabled")
+```
+
+## Examples
+
+### Official MCP Servers
+
+<Tabs>
+  <Tab title="Filesystem">
+    ```json
+    {
+      "filesystem": {
+        "enabled": true,
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "/home/user/documents"
+        ],
+        "description": "Access to /home/user/documents"
+      }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="GitHub">
+    ```json
+    {
+      "github": {
+        "enabled": true,
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-github"
+        ],
+        "env": {
+          "GITHUB_TOKEN": "$GITHUB_TOKEN"
+        },
+        "description": "GitHub repository operations"
+      }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="PostgreSQL">
+    ```json
+    {
+      "postgres": {
+        "enabled": true,
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-postgres",
+          "postgresql://user:pass@localhost/mydb"
+        ],
+        "description": "PostgreSQL database access"
+      }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Brave Search">
+    ```json
+    {
+      "brave-search": {
+        "enabled": true,
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-brave-search"
+        ],
+        "env": {
+          "BRAVE_API_KEY": "$BRAVE_API_KEY"
+        },
+        "description": "Brave web search"
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Custom Skills Example
+
+Create a custom skill:
+
+1. Create skill directory:
+   ```bash
+   mkdir -p skills/custom/my-skill
+   ```
+
+2. Create `SKILL.md`:
+   ```markdown skills/custom/my-skill/SKILL.md
+   # My Custom Skill
+   
+   This skill provides specialized capabilities for...
+   
+   ## Instructions
+   
+   When the user asks for..., follow these steps:
+   1. ...
+   2. ...
+   ```
+
+3. Enable in `extensions_config.json`:
+   ```json
+   {
+     "skills": {
+       "my-skill": {
+         "enabled": true
+       }
+     }
+   }
+   ```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Environment variable not found" icon="triangle-exclamation">
+    Ensure all referenced environment variables are set:
+    
+    ```bash
+    # Check if variable is set
+    echo $GITHUB_TOKEN
+    
+    # Add to .env file
+    echo "GITHUB_TOKEN=ghp_..." >> .env
+    ```
+  </Accordion>
+  
+  <Accordion title="MCP server fails to start (stdio)" icon="triangle-exclamation">
+    Verify the command is available:
+    
+    ```bash
+    # Test the command manually
+    npx -y @modelcontextprotocol/server-github --help
+    
+    # Check npx is installed
+    which npx
+    ```
+  </Accordion>
+  
+  <Accordion title="Skills not found" icon="triangle-exclamation">
+    Check the skills path configuration:
+    
+    ```yaml
+    skills:
+      path: /absolute/path/to/skills  # Ensure this exists
+    ```
+    
+    ```bash
+    # Verify skills directory exists
+    ls -la /absolute/path/to/skills
+    ```
+  </Accordion>
+  
+  <Accordion title="OAuth token refresh fails" icon="triangle-exclamation">
+    Check OAuth configuration:
+    - Verify `token_url` is correct
+    - Ensure `client_id` and `client_secret` are set
+    - Check `scope` matches provider requirements
+    - Review provider's OAuth documentation
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Memory Configuration" icon="database" href="/configuration/memory">
+    Set up the memory system
+  </Card>
+  <Card title="Creating Skills" icon="code" href="/guides/creating-skills">
+    Build custom skills
+  </Card>
+</CardGroup>

@@ -1,0 +1,321 @@
+---
+title: Sub-Agent Tools
+description: Delegate complex tasks to specialized sub-agents for isolated context execution
+---
+
+## Overview
+
+The `task()` tool allows you to delegate work to specialized sub-agents that run in their own isolated context. This helps preserve the main conversation context and enables autonomous execution of complex, multi-step tasks.
+
+## task
+
+Delegate a task to a specialized sub-agent that runs in its own context.
+
+### Parameters
+
+<ParamField path="description" type="str" required>
+  A short (3-5 word) description of the task for logging and display. **ALWAYS PROVIDE THIS PARAMETER FIRST.**
+</ParamField>
+
+<ParamField path="prompt" type="str" required>
+  The task description for the sub-agent. Be specific and clear about what needs to be done. **ALWAYS PROVIDE THIS PARAMETER SECOND.**
+</ParamField>
+
+<ParamField path="subagent_type" type="Literal['general-purpose', 'bash']" required>
+  The type of sub-agent to use. **ALWAYS PROVIDE THIS PARAMETER THIRD.**
+</ParamField>
+
+<ParamField path="max_turns" type="int" optional>
+  Optional maximum number of agent turns. Defaults to the sub-agent's configured maximum.
+</ParamField>
+
+---
+
+## Sub-Agent Types
+
+### general-purpose
+
+A capable agent for complex, multi-step tasks that require both exploration and action.
+
+**Configuration:**
+- Max turns: 50 (default)
+- Timeout: 900 seconds (15 minutes)
+- Available tools: All parent tools (except `task`, `ask_clarification`, `present_files`)
+
+**Use this sub-agent when:**
+- The task requires both exploration and modification
+- Complex reasoning is needed to interpret results
+- Multiple dependent steps must be executed
+- The task would benefit from isolated context management
+
+**Do NOT use for:**
+- Simple, single-step operations (use tools directly)
+- Tasks requiring user interaction or clarification
+
+**Example:**
+```python
+task(
+    description="Analyze codebase structure",
+    prompt="Analyze the project structure in /mnt/user-data/workspace and create a detailed report of all Python modules, their dependencies, and key functions. Save the report to /mnt/user-data/outputs/analysis.md",
+    subagent_type="general-purpose"
+)
+```
+
+### bash
+
+Command execution specialist for running bash commands in a separate context.
+
+**Configuration:**
+- Max turns: 30 (default)
+- Timeout: 900 seconds (15 minutes)
+- Available tools: `bash`, `ls`, `read_file`, `write_file`, `str_replace` only
+
+**Use this sub-agent when:**
+- You need to run a series of related bash commands
+- Terminal operations like git, npm, docker, etc.
+- Command output is verbose and would clutter main context
+- Build, test, or deployment operations
+
+**Do NOT use for:**
+- Simple single commands (use `bash` tool directly instead)
+
+**Example:**
+```python
+task(
+    description="Build and test project",
+    prompt="Navigate to /mnt/user-data/workspace, run npm install, then npm run build, and finally npm test. Report any errors or test failures.",
+    subagent_type="bash"
+)
+```
+
+---
+
+## When to Use Sub-Agents
+
+Sub-agents help you:
+- **Preserve context**: Keep exploration and implementation separate from the main conversation
+- **Handle complexity**: Execute complex multi-step tasks autonomously
+- **Isolate execution**: Run commands or operations without cluttering the main context
+- **Parallelize work**: Delegate independent tasks to run concurrently
+
+### Good Use Cases
+
+```python
+# Complex analysis task
+task(
+    description="Performance analysis",
+    prompt="Analyze the performance of all API endpoints in the codebase. Check for N+1 queries, missing indexes, and slow operations. Generate a report with recommendations.",
+    subagent_type="general-purpose"
+)
+
+# Git operations
+task(
+    description="Git sync and merge",
+    prompt="Fetch the latest changes from origin, merge main into the current branch, resolve any conflicts in favor of the current branch, and push the changes.",
+    subagent_type="bash"
+)
+
+# Refactoring task
+task(
+    description="Extract utility functions",
+    prompt="Find all duplicate code patterns in the /mnt/user-data/workspace/src directory and extract them into a new utils.py file with proper documentation.",
+    subagent_type="general-purpose",
+    max_turns=30
+)
+```
+
+### When NOT to Use
+
+```python
+# DON'T: Simple single command
+# BAD
+task(
+    description="List files",
+    prompt="List files in /mnt/user-data/workspace",
+    subagent_type="bash"
+)
+# GOOD
+ls(description="List files", path="/mnt/user-data/workspace")
+
+# DON'T: Tasks requiring user input
+# BAD
+task(
+    description="Get API key",
+    prompt="Ask the user for their API key and save it to config",
+    subagent_type="general-purpose"
+)
+# GOOD - ask_clarification is disallowed in sub-agents anyway
+ask_clarification(
+    question="What is your API key?",
+    clarification_type="missing_info"
+)
+```
+
+---
+
+## Delegation Flow
+
+1. **Task Initialization**
+   - Sub-agent executor is created with specified configuration
+   - Parent context (sandbox, thread data, model) is inherited
+   - Task starts in background thread
+
+2. **Execution**
+   - Sub-agent runs autonomously in isolated context
+   - Progress updates stream to parent via task events
+   - Timeout and max turns enforced automatically
+
+3. **Completion**
+   - Results returned to parent agent
+   - Success/failure/timeout status reported
+   - Execution logs available for debugging
+
+### Task Events
+
+The parent agent receives real-time events:
+
+- `task_started`: Task begins execution
+- `task_running`: Sub-agent sends progress messages
+- `task_completed`: Task finishes successfully
+- `task_failed`: Task encounters an error
+- `task_timed_out`: Task exceeds timeout limit
+
+---
+
+## Return Values
+
+The `task()` tool returns a string with the execution result:
+
+### Success
+```
+Task Succeeded. Result: [sub-agent's final response]
+```
+
+### Failure
+```
+Task failed. Error: [error description]
+```
+
+### Timeout
+```
+Task timed out. Error: [timeout details]
+```
+
+---
+
+## Advanced Usage
+
+### Custom Max Turns
+
+Limit the number of agent iterations:
+
+```python
+task(
+    description="Quick code review",
+    prompt="Review the main.py file for obvious bugs and style issues",
+    subagent_type="general-purpose",
+    max_turns=10  # Override default 50
+)
+```
+
+### Parallel Delegation
+
+Delegate multiple independent tasks:
+
+```python
+# Task 1: Analyze frontend
+task(
+    description="Analyze frontend",
+    prompt="Analyze React components in /mnt/user-data/workspace/frontend",
+    subagent_type="general-purpose"
+)
+
+# Task 2: Analyze backend (runs in parallel)
+task(
+    description="Analyze backend",
+    prompt="Analyze Python services in /mnt/user-data/workspace/backend",
+    subagent_type="general-purpose"
+)
+```
+
+---
+
+## Best Practices
+
+### Clear Instructions
+
+Provide specific, actionable prompts:
+
+```python
+# Good: Specific and actionable
+task(
+    description="Update dependencies",
+    prompt="Update all Python dependencies in requirements.txt to their latest compatible versions. Check for breaking changes and update code if necessary. Run tests to verify everything works.",
+    subagent_type="general-purpose"
+)
+
+# Bad: Vague and unclear
+task(
+    description="Fix dependencies",
+    prompt="Make the dependencies better",
+    subagent_type="general-purpose"
+)
+```
+
+### Choose the Right Sub-Agent
+
+- Use `general-purpose` for tasks requiring reasoning and exploration
+- Use `bash` for pure command execution sequences
+- Use tools directly for simple operations
+
+### Handle Results
+
+Sub-agents return structured results that should be parsed:
+
+```python
+result = task(
+    description="Run tests",
+    prompt="Run pytest and report results",
+    subagent_type="bash"
+)
+
+if "Task Succeeded" in result:
+    # Extract and use the results
+    print("Tests passed!")
+else:
+    # Handle failure
+    print(f"Tests failed: {result}")
+```
+
+---
+
+## Technical Details
+
+### Context Inheritance
+
+Sub-agents inherit from parent:
+- Sandbox state and environment
+- Thread data (workspace, uploads, outputs paths)
+- Model configuration
+- Available tools (with restrictions)
+
+### Disallowed Tools
+
+Sub-agents cannot use:
+- `task`: Prevents recursive nesting
+- `ask_clarification`: Sub-agents must work autonomously
+- `present_files`: Only parent can present files to user
+
+### Timeout Handling
+
+- Default timeout: 900 seconds (15 minutes)
+- Enforced at thread pool level
+- Polling timeout includes 60-second buffer
+- Status checked every 5 seconds
+
+### Tracing
+
+All sub-agent executions are traced:
+- Unique trace ID propagated to sub-agent
+- Logs include trace ID for correlation
+- Task ID matches tool call ID for traceability

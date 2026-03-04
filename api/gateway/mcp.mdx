@@ -1,0 +1,426 @@
+---
+title: 'MCP API'
+description: 'Manage Model Context Protocol (MCP) server configurations'
+---
+
+## Overview
+
+The MCP API provides endpoints to retrieve and update Model Context Protocol (MCP) server configurations. MCP servers extend AI agents with external tools and capabilities.
+
+## Get MCP Configuration
+
+<Card title="GET /api/mcp/config" icon="gear">
+  Retrieve the current Model Context Protocol (MCP) server configurations
+</Card>
+
+### Response
+
+<ResponseField name="mcp_servers" type="object">
+  Map of MCP server name to configuration object
+  
+  <Expandable title="MCP Server Config">
+    <ResponseField name="enabled" type="boolean" default="true">
+      Whether this MCP server is enabled
+    </ResponseField>
+    
+    <ResponseField name="type" type="string" default="stdio">
+      Transport type: `stdio`, `sse`, or `http`
+    </ResponseField>
+    
+    <ResponseField name="command" type="string">
+      Command to execute to start the MCP server (for stdio type)
+    </ResponseField>
+    
+    <ResponseField name="args" type="array">
+      Arguments to pass to the command (for stdio type)
+    </ResponseField>
+    
+    <ResponseField name="env" type="object">
+      Environment variables for the MCP server
+    </ResponseField>
+    
+    <ResponseField name="url" type="string">
+      URL of the MCP server (for sse or http type)
+    </ResponseField>
+    
+    <ResponseField name="headers" type="object">
+      HTTP headers to send (for sse or http type)
+    </ResponseField>
+    
+    <ResponseField name="oauth" type="object">
+      OAuth configuration for MCP HTTP/SSE servers
+      
+      <Expandable title="OAuth Config">
+        <ResponseField name="enabled" type="boolean" default="true">
+          Whether OAuth token injection is enabled
+        </ResponseField>
+        
+        <ResponseField name="token_url" type="string">
+          OAuth token endpoint URL
+        </ResponseField>
+        
+        <ResponseField name="grant_type" type="string" default="client_credentials">
+          OAuth grant type: `client_credentials` or `refresh_token`
+        </ResponseField>
+        
+        <ResponseField name="client_id" type="string">
+          OAuth client ID
+        </ResponseField>
+        
+        <ResponseField name="client_secret" type="string">
+          OAuth client secret
+        </ResponseField>
+        
+        <ResponseField name="refresh_token" type="string">
+          OAuth refresh token (for refresh_token grant type)
+        </ResponseField>
+        
+        <ResponseField name="scope" type="string">
+          OAuth scope
+        </ResponseField>
+        
+        <ResponseField name="audience" type="string">
+          OAuth audience
+        </ResponseField>
+        
+        <ResponseField name="token_field" type="string" default="access_token">
+          Token response field containing access token
+        </ResponseField>
+        
+        <ResponseField name="token_type_field" type="string" default="token_type">
+          Token response field containing token type
+        </ResponseField>
+        
+        <ResponseField name="expires_in_field" type="string" default="expires_in">
+          Token response field containing expires-in seconds
+        </ResponseField>
+        
+        <ResponseField name="default_token_type" type="string" default="Bearer">
+          Default token type when response omits token_type
+        </ResponseField>
+        
+        <ResponseField name="refresh_skew_seconds" type="integer" default="60">
+          Refresh this many seconds before expiry
+        </ResponseField>
+        
+        <ResponseField name="extra_token_params" type="object">
+          Additional form params sent to token endpoint
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    
+    <ResponseField name="description" type="string">
+      Human-readable description of what this MCP server provides
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Request
+
+```bash
+curl http://localhost:8001/api/mcp/config
+```
+
+### Example Response
+
+```json
+{
+  "mcp_servers": {
+    "github": {
+      "enabled": true,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": "$GITHUB_TOKEN"
+      },
+      "url": null,
+      "headers": {},
+      "oauth": null,
+      "description": "GitHub MCP server for repository operations"
+    },
+    "filesystem": {
+      "enabled": true,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/allowed/path"],
+      "env": {},
+      "url": null,
+      "headers": {},
+      "oauth": null,
+      "description": "Filesystem access MCP server"
+    }
+  }
+}
+```
+
+---
+
+## Update MCP Configuration
+
+<Card title="PUT /api/mcp/config" icon="pen-to-square">
+  Update Model Context Protocol (MCP) server configurations and save to file
+</Card>
+
+### Request Body
+
+<ParamField body="mcp_servers" type="object" required>
+  Map of MCP server name to configuration (same structure as GET response)
+</ParamField>
+
+### Response
+
+Returns the updated MCP configuration (same as GET response).
+
+### Example Request
+
+```bash
+curl -X PUT http://localhost:8001/api/mcp/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mcp_servers": {
+      "github": {
+        "enabled": true,
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": {
+          "GITHUB_TOKEN": "$GITHUB_TOKEN"
+        },
+        "description": "GitHub MCP server for repository operations"
+      }
+    }
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "mcp_servers": {
+    "github": {
+      "enabled": true,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": "$GITHUB_TOKEN"
+      },
+      "url": null,
+      "headers": {},
+      "oauth": null,
+      "description": "GitHub MCP server for repository operations"
+    }
+  }
+}
+```
+
+### Behavior
+
+When you update the MCP configuration:
+
+1. The new configuration is saved to `extensions_config.json`
+2. The configuration cache is reloaded
+3. The LangGraph Server (separate process) detects the config file change via mtime
+4. MCP tools are automatically reinitialized with the new configuration
+
+### Error Responses
+
+<ResponseField name="500" type="Internal Server Error">
+  Failed to update MCP configuration
+  
+  ```json
+  {
+    "detail": "Failed to update MCP configuration: [error details]"
+  }
+  ```
+</ResponseField>
+
+---
+
+## MCP Server Types
+
+### stdio (Standard Input/Output)
+
+The most common MCP server type. The server is spawned as a subprocess and communicates via stdin/stdout.
+
+```json
+{
+  "type": "stdio",
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-github"],
+  "env": {
+    "GITHUB_TOKEN": "$GITHUB_TOKEN"
+  }
+}
+```
+
+### SSE (Server-Sent Events)
+
+HTTP-based server using Server-Sent Events for streaming responses.
+
+```json
+{
+  "type": "sse",
+  "url": "https://api.example.com/mcp",
+  "headers": {
+    "Authorization": "Bearer $API_TOKEN"
+  }
+}
+```
+
+### HTTP
+
+Standard HTTP-based MCP server.
+
+```json
+{
+  "type": "http",
+  "url": "https://api.example.com/mcp",
+  "headers": {
+    "Authorization": "Bearer $API_TOKEN"
+  }
+}
+```
+
+---
+
+## OAuth Configuration
+
+For HTTP and SSE servers that require OAuth authentication, you can configure automatic token management:
+
+```json
+{
+  "type": "sse",
+  "url": "https://api.example.com/mcp",
+  "oauth": {
+    "enabled": true,
+    "token_url": "https://auth.example.com/oauth/token",
+    "grant_type": "client_credentials",
+    "client_id": "$CLIENT_ID",
+    "client_secret": "$CLIENT_SECRET",
+    "scope": "mcp.read mcp.write",
+    "audience": "https://api.example.com",
+    "refresh_skew_seconds": 60
+  }
+}
+```
+
+### Grant Types
+
+#### client_credentials
+
+Used for server-to-server authentication:
+
+```json
+{
+  "grant_type": "client_credentials",
+  "client_id": "$CLIENT_ID",
+  "client_secret": "$CLIENT_SECRET"
+}
+```
+
+#### refresh_token
+
+Used when you have a refresh token:
+
+```json
+{
+  "grant_type": "refresh_token",
+  "client_id": "$CLIENT_ID",
+  "client_secret": "$CLIENT_SECRET",
+  "refresh_token": "$REFRESH_TOKEN"
+}
+```
+
+---
+
+## Environment Variables
+
+You can reference environment variables in the configuration using the `$VAR_NAME` syntax:
+
+```json
+{
+  "env": {
+    "GITHUB_TOKEN": "$GITHUB_TOKEN",
+    "API_KEY": "$MY_API_KEY"
+  },
+  "headers": {
+    "Authorization": "Bearer $API_TOKEN"
+  }
+}
+```
+
+Variables are resolved at runtime from the process environment.
+
+---
+
+## Use Cases
+
+### List Configured Servers
+
+```typescript
+const response = await fetch('http://localhost:8001/api/mcp/config');
+const { mcp_servers } = await response.json();
+
+// Get enabled servers
+const enabledServers = Object.entries(mcp_servers)
+  .filter(([_, config]) => config.enabled)
+  .map(([name, _]) => name);
+```
+
+### Add New Server
+
+```typescript
+async function addMcpServer(serverName: string, config: any) {
+  // Get current config
+  const response = await fetch('http://localhost:8001/api/mcp/config');
+  const currentConfig = await response.json();
+  
+  // Add new server
+  currentConfig.mcp_servers[serverName] = config;
+  
+  // Update config
+  const updateResponse = await fetch('http://localhost:8001/api/mcp/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(currentConfig)
+  });
+  
+  return updateResponse.json();
+}
+```
+
+### Disable Server
+
+```typescript
+async function disableMcpServer(serverName: string) {
+  const response = await fetch('http://localhost:8001/api/mcp/config');
+  const config = await response.json();
+  
+  if (config.mcp_servers[serverName]) {
+    config.mcp_servers[serverName].enabled = false;
+    
+    const updateResponse = await fetch('http://localhost:8001/api/mcp/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+    
+    return updateResponse.json();
+  }
+}
+```
+
+---
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="MCP Overview" icon="plug" href="/customize/mcp">
+    Learn about Model Context Protocol
+  </Card>
+  <Card title="Gateway Overview" icon="book" href="/api/gateway/overview">
+    Learn about the Gateway API
+  </Card>
+</CardGroup>

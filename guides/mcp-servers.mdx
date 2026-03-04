@@ -1,0 +1,596 @@
+---
+title: MCP Servers
+description: Integrate external tools using the Model Context Protocol
+---
+
+## What is MCP?
+
+The Model Context Protocol (MCP) is a standardized way to connect AI agents to external tools and data sources. MCP servers expose tools that DeerFlow can automatically discover and integrate.
+
+<Info>
+  Learn more about MCP at [modelcontextprotocol.io](https://modelcontextprotocol.io)
+</Info>
+
+### MCP Capabilities
+
+<CardGroup cols={2}>
+  <Card title="File Systems" icon="folder-tree">
+    Access local or remote file systems
+  </Card>
+  
+  <Card title="Databases" icon="database">
+    Query PostgreSQL, SQLite, and other databases
+  </Card>
+  
+  <Card title="External APIs" icon="globe">
+    Integrate GitHub, Brave Search, and more
+  </Card>
+  
+  <Card title="Browser Automation" icon="browser">
+    Control browsers with Puppeteer
+  </Card>
+</CardGroup>
+
+## MCP Transport Types
+
+DeerFlow supports three MCP transport mechanisms:
+
+<Tabs>
+  <Tab title="stdio">
+    Standard input/output communication with a subprocess.
+    
+    **Best for**: Local command-line tools, Node.js scripts
+    
+    ```json
+    {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": "$GITHUB_TOKEN"
+      }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="SSE (Server-Sent Events)">
+    HTTP-based streaming communication.
+    
+    **Best for**: Remote services, cloud-hosted tools
+    
+    ```json
+    {
+      "type": "sse",
+      "url": "https://api.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer $API_TOKEN"
+      }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="HTTP">
+    Standard HTTP request/response.
+    
+    **Best for**: RESTful APIs, stateless services
+    
+    ```json
+    {
+      "type": "http",
+      "url": "https://api.example.com/mcp",
+      "headers": {
+        "X-API-Key": "$API_KEY"
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Configuration
+
+MCP servers are configured in `extensions_config.json` (separate from `config.yaml`).
+
+<Steps>
+  <Step title="Copy Example Configuration">
+    ```bash
+    cp extensions_config.example.json extensions_config.json
+    ```
+  </Step>
+  
+  <Step title="Configure MCP Servers">
+    Edit `extensions_config.json`:
+    
+    ```json extensions_config.json
+    {
+      "mcpServers": {
+        "github": {
+          "enabled": true,
+          "type": "stdio",
+          "command": "npx",
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-github"
+          ],
+          "env": {
+            "GITHUB_TOKEN": "$GITHUB_TOKEN"
+          }
+        },
+        "filesystem": {
+          "enabled": true,
+          "type": "stdio",
+          "command": "npx",
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-filesystem",
+            "/path/to/allowed/directory"
+          ]
+        },
+        "postgres": {
+          "enabled": false,
+          "type": "stdio",
+          "command": "npx",
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-postgres",
+            "postgresql://user:pass@localhost/db"
+          ]
+        }
+      }
+    }
+    ```
+  </Step>
+  
+  <Step title="Set Environment Variables">
+    Set required API tokens in `.env`:
+    
+    ```bash .env
+    GITHUB_TOKEN=your-github-token
+    ```
+  </Step>
+  
+  <Step title="Restart DeerFlow">
+    ```bash
+    make stop
+    make dev
+    ```
+    
+    MCP servers are loaded automatically on startup.
+  </Step>
+</Steps>
+
+## OAuth for HTTP/SSE Servers
+
+For HTTP and SSE transport types, DeerFlow supports OAuth token acquisition and automatic refresh.
+
+### Supported Grant Types
+
+<Tabs>
+  <Tab title="client_credentials">
+    OAuth 2.0 client credentials flow.
+    
+    ```json extensions_config.json
+    {
+      "mcpServers": {
+        "secure-api": {
+          "enabled": true,
+          "type": "http",
+          "url": "https://api.example.com/mcp",
+          "oauth": {
+            "enabled": true,
+            "token_url": "https://auth.example.com/oauth/token",
+            "grant_type": "client_credentials",
+            "client_id": "$MCP_CLIENT_ID",
+            "client_secret": "$MCP_CLIENT_SECRET",
+            "scope": "mcp.read mcp.write"
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="refresh_token">
+    OAuth 2.0 refresh token flow.
+    
+    ```json extensions_config.json
+    {
+      "mcpServers": {
+        "secure-api": {
+          "enabled": true,
+          "type": "sse",
+          "url": "https://api.example.com/mcp",
+          "oauth": {
+            "enabled": true,
+            "token_url": "https://auth.example.com/oauth/token",
+            "grant_type": "refresh_token",
+            "client_id": "$MCP_CLIENT_ID",
+            "client_secret": "$MCP_CLIENT_SECRET",
+            "refresh_token": "$MCP_REFRESH_TOKEN",
+            "scope": "mcp.read"
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### OAuth Configuration Options
+
+```json
+{
+  "oauth": {
+    "enabled": true,
+    "token_url": "https://auth.example.com/oauth/token",
+    "grant_type": "client_credentials",  // or "refresh_token"
+    "client_id": "$MCP_OAUTH_CLIENT_ID",
+    "client_secret": "$MCP_OAUTH_CLIENT_SECRET",
+    "scope": "mcp.read mcp.write",
+    "refresh_skew_seconds": 60  // Refresh tokens 60s before expiry
+  }
+}
+```
+
+<Info>
+  DeerFlow automatically refreshes tokens before they expire based on `refresh_skew_seconds`.
+</Info>
+
+## Popular MCP Servers
+
+### Official MCP Servers
+
+<AccordionGroup>
+  <Accordion title="GitHub">
+    Access GitHub repositories, issues, and pull requests.
+    
+    ```json
+    {
+      "github": {
+        "enabled": true,
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": {
+          "GITHUB_TOKEN": "$GITHUB_TOKEN"
+        }
+      }
+    }
+    ```
+    
+    **Get token**: [github.com/settings/tokens](https://github.com/settings/tokens)
+  </Accordion>
+  
+  <Accordion title="Filesystem">
+    Read and write files in allowed directories.
+    
+    ```json
+    {
+      "filesystem": {
+        "enabled": true,
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "/Users/username/Documents",
+          "/Users/username/Projects"
+        ]
+      }
+    }
+    ```
+    
+    <Warning>
+      Only directories listed in args are accessible. Choose carefully for security.
+    </Warning>
+  </Accordion>
+  
+  <Accordion title="PostgreSQL">
+    Query PostgreSQL databases.
+    
+    ```json
+    {
+      "postgres": {
+        "enabled": true,
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-postgres",
+          "postgresql://user:password@localhost:5432/database"
+        ]
+      }
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Brave Search">
+    Web and local search using Brave.
+    
+    ```json
+    {
+      "brave-search": {
+        "enabled": true,
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+        "env": {
+          "BRAVE_API_KEY": "$BRAVE_API_KEY"
+        }
+      }
+    }
+    ```
+    
+    **Get API key**: [brave.com/search/api](https://brave.com/search/api)
+  </Accordion>
+  
+  <Accordion title="Puppeteer">
+    Browser automation and web scraping.
+    
+    ```json
+    {
+      "puppeteer": {
+        "enabled": true,
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-puppeteer"]
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Community MCP Servers
+
+Find more servers in the [MCP Servers Directory](https://github.com/modelcontextprotocol/servers)
+
+## Managing MCP Servers
+
+### Via API
+
+Manage MCP configuration programmatically:
+
+<CodeGroup>
+```bash Get Configuration
+curl http://localhost:2026/api/mcp/config
+```
+
+```bash Update Configuration
+curl -X PUT http://localhost:2026/api/mcp/config \
+  -H "Content-Type: application/json" \
+  -d @extensions_config.json
+```
+
+```bash List Available Tools
+curl http://localhost:2026/api/mcp/tools
+```
+</CodeGroup>
+
+### Dynamic Reloading
+
+DeerFlow automatically detects changes to `extensions_config.json`:
+
+1. Edit `extensions_config.json`
+2. Save the file
+3. MCP manager detects file change
+4. New configuration loaded automatically
+5. Next agent run uses updated tools
+
+<Info>
+  No restart required when modifying `extensions_config.json`.
+</Info>
+
+## Creating Custom MCP Servers
+
+Create your own MCP server:
+
+<Steps>
+  <Step title="Choose Language/Framework">
+    MCP servers can be written in any language. Official SDKs:
+    - Python: `mcp` package
+    - TypeScript: `@modelcontextprotocol/sdk`
+  </Step>
+  
+  <Step title="Implement MCP Protocol">
+    ```typescript server.ts
+    import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+    import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+    
+    const server = new Server(
+      {
+        name: "my-custom-server",
+        version: "1.0.0",
+      },
+      {
+        capabilities: {
+          tools: {},
+        },
+      }
+    );
+    
+    // Register tools
+    server.setRequestHandler("tools/list", async () => {
+      return {
+        tools: [
+          {
+            name: "my_tool",
+            description: "Does something useful",
+            inputSchema: {
+              type: "object",
+              properties: {
+                param: { type: "string" }
+              }
+            }
+          }
+        ]
+      };
+    });
+    
+    // Handle tool calls
+    server.setRequestHandler("tools/call", async (request) => {
+      // Implement tool logic
+      return { result: "success" };
+    });
+    
+    // Start server
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    ```
+  </Step>
+  
+  <Step title="Package and Publish">
+    ```json package.json
+    {
+      "name": "mcp-server-custom",
+      "version": "1.0.0",
+      "bin": {
+        "mcp-server-custom": "./dist/index.js"
+      }
+    }
+    ```
+    
+    Publish to npm or use locally.
+  </Step>
+  
+  <Step title="Configure in DeerFlow">
+    ```json extensions_config.json
+    {
+      "mcpServers": {
+        "my-custom-server": {
+          "enabled": true,
+          "type": "stdio",
+          "command": "npx",
+          "args": ["-y", "mcp-server-custom"]
+        }
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Security Considerations
+
+<Warning>
+  MCP servers have access to sensitive resources. Configure carefully.
+</Warning>
+
+### Best Practices
+
+1. **Use Environment Variables for Secrets**
+   ```json
+   "env": {
+     "API_KEY": "$MY_API_KEY"  // ✅ From .env
+   }
+   ```
+   
+   Never hardcode:
+   ```json
+   "env": {
+     "API_KEY": "sk-12345..."  // ❌ Exposed in config
+   }
+   ```
+
+2. **Limit Filesystem Access**
+   ```json
+   [
+     "/Users/me/safe-directory"  // ✅ Specific directory
+   ]
+   ```
+   
+   Avoid:
+   ```json
+   [
+     "/"  // ❌ Full system access
+   ]
+   ```
+
+3. **Disable Unused Servers**
+   ```json
+   {
+     "enabled": false  // Disabled servers don't load
+   }
+   ```
+
+4. **Review Server Code**
+   - Check source code of community servers
+   - Verify npm package authenticity
+   - Use official servers when available
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Server fails to start">
+    Check logs for errors:
+    ```bash
+    tail -f logs/gateway.log
+    ```
+    
+    Common issues:
+    - Missing npm packages: `npx` will auto-install, but may fail
+    - Invalid command path
+    - Missing environment variables
+    - Permission issues
+  </Accordion>
+  
+  <Accordion title="Tools not appearing">
+    Verify server is enabled:
+    ```json
+    {
+      "enabled": true  // Must be true
+    }
+    ```
+    
+    Check available tools:
+    ```bash
+    curl http://localhost:2026/api/mcp/tools
+    ```
+  </Accordion>
+  
+  <Accordion title="OAuth authentication fails">
+    Verify:
+    - Token URL is correct
+    - Client ID and secret are valid
+    - Scope is appropriate
+    - Environment variables are set
+    
+    Check logs for OAuth errors:
+    ```bash
+    tail -f logs/gateway.log | grep oauth
+    ```
+  </Accordion>
+  
+  <Accordion title="Server crashes frequently">
+    Add error logging to server code.
+    
+    Consider using `http` or `sse` transport instead of `stdio` for better error handling.
+    
+    Wrap server execution in a restart script:
+    ```bash
+    #!/bin/bash
+    while true; do
+      npx -y @modelcontextprotocol/server-custom
+      echo "Server crashed, restarting..."
+      sleep 5
+    done
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Custom Tools" icon="wrench" href="/guides/custom-tools">
+    Learn about creating Python tools
+  </Card>
+  
+  <Card title="Creating Skills" icon="wand-magic-sparkles" href="/guides/creating-skills">
+    Build skills that use MCP tools
+  </Card>
+  
+  <Card title="MCP Specification" icon="book" href="https://modelcontextprotocol.io">
+    Read the official MCP documentation
+  </Card>
+  
+  <Card title="MCP Servers" icon="github" href="https://github.com/modelcontextprotocol/servers">
+    Browse community MCP servers
+  </Card>
+</CardGroup>

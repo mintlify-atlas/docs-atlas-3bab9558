@@ -1,0 +1,450 @@
+---
+title: Sandbox Modes
+description: Configure sandbox execution environments - local, Docker, or Kubernetes-based isolation
+---
+
+DeerFlow supports multiple sandbox modes for executing code and commands. Choose between local execution for simplicity, Docker for isolation, or Kubernetes for production scalability.
+
+## Overview
+
+The sandbox system provides isolated execution environments for agent operations. All file operations, command execution, and code running happen within the sandbox.
+
+<CardGroup cols={3}>
+  <Card title="Local Sandbox" icon="laptop">
+    Direct execution on host machine. Fast but no isolation.
+  </Card>
+  <Card title="Docker Sandbox" icon="docker">
+    Containerized execution with full isolation. Recommended for development.
+  </Card>
+  <Card title="Kubernetes Sandbox" icon="cubes">
+    Pod-based execution managed by provisioner. Best for production.
+  </Card>
+</CardGroup>
+
+## Local Sandbox
+
+The simplest mode - executes commands directly on the host machine.
+
+### Configuration
+
+```yaml config.yaml
+sandbox:
+  use: src.sandbox.local:LocalSandboxProvider
+```
+
+### Characteristics
+
+<Icon icon="check" /> Fast - no container overhead  
+<Icon icon="check" /> Simple setup - no Docker required  
+<Icon icon="xmark" /> No isolation - full host access  
+<Icon icon="xmark" /> Security risk - agent can access all host files
+
+<Warning>
+  **Local sandbox is not recommended for production use.** The agent has unrestricted access to your filesystem and can execute any command.
+</Warning>
+
+### Use Cases
+
+- Quick local development and testing
+- Running in trusted environments
+- Debugging without container complexity
+- Limited resource environments
+
+## Docker Sandbox (AIO Sandbox)
+
+Containerized execution using Docker or Apple Container (macOS). Provides isolation while maintaining good performance.
+
+### Basic Configuration
+
+```yaml config.yaml
+sandbox:
+  use: src.community.aio_sandbox:AioSandboxProvider
+```
+
+This minimal configuration automatically:
+- Starts a Docker container on port 8080
+- Uses the default all-in-one sandbox image
+- Mounts the skills directory
+- On macOS: Prefers Apple Container if available, falls back to Docker
+
+### Advanced Configuration
+
+```yaml config.yaml
+sandbox:
+  use: src.community.aio_sandbox:AioSandboxProvider
+  
+  # Custom container image
+  image: enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+  
+  # Base port for sandbox containers
+  port: 8080
+  
+  # Whether to automatically start containers
+  auto_start: true
+  
+  # Container name prefix
+  container_prefix: deer-flow-sandbox
+  
+  # Idle timeout (seconds) before sandbox is released
+  # Set to 0 to disable timeout
+  idle_timeout: 600
+  
+  # Additional volume mounts
+  mounts:
+    - host_path: /path/on/host
+      container_path: /home/user/shared
+      read_only: false
+  
+  # Environment variables injected into container
+  # Variables starting with $ are resolved from host environment
+  environment:
+    NODE_ENV: production
+    DEBUG: "false"
+    API_KEY: $MY_API_KEY
+    DATABASE_URL: $DATABASE_URL
+```
+
+### Configuration Options
+
+<ParamField path="use" type="string" required>
+  Must be `src.community.aio_sandbox:AioSandboxProvider`
+</ParamField>
+
+<ParamField path="image" type="string" default="enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest">
+  Docker image to use. The default image works on both x86_64 and arm64 architectures.
+</ParamField>
+
+<ParamField path="port" type="integer" default="8080">
+  Base port for sandbox containers. Each container uses an incremental port.
+</ParamField>
+
+<ParamField path="base_url" type="string">
+  If set, uses an existing sandbox at this URL instead of starting a new container.
+  
+  Example: `http://localhost:8080`
+</ParamField>
+
+<ParamField path="auto_start" type="boolean" default="true">
+  Whether to automatically start Docker containers. Set to `false` if managing containers manually.
+</ParamField>
+
+<ParamField path="container_prefix" type="string" default="deer-flow-sandbox">
+  Prefix for container names. Containers are named `{prefix}-{thread_id}`.
+</ParamField>
+
+<ParamField path="idle_timeout" type="integer" default="600">
+  Idle timeout in seconds before sandbox is released (default: 10 minutes). Set to `0` to disable timeout.
+</ParamField>
+
+<ParamField path="mounts" type="array">
+  Additional volume mounts to share directories between host and container.
+  
+  **Note:** The skills directory is automatically mounted.
+  
+  Each mount requires:
+  - `host_path`: Path on the host machine
+  - `container_path`: Path inside the container
+  - `read_only`: Whether the mount is read-only (default: false)
+</ParamField>
+
+<ParamField path="environment" type="object">
+  Environment variables to inject into the sandbox container.
+  
+  Values starting with `$` are resolved from the host environment:
+  ```yaml
+  environment:
+    API_KEY: $MY_API_KEY  # Reads from host's MY_API_KEY variable
+    STATIC_VALUE: "foo"   # Literal value
+  ```
+</ParamField>
+
+### Using Existing Sandbox
+
+Connect to a pre-started sandbox instead of managing containers:
+
+```yaml config.yaml
+sandbox:
+  use: src.community.aio_sandbox:AioSandboxProvider
+  base_url: http://localhost:8080  # No container will be started
+```
+
+Start the sandbox manually:
+
+```bash
+docker run -d \
+  --name deer-flow-sandbox \
+  -p 8080:8080 \
+  -v /path/to/skills:/mnt/skills:ro \
+  enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+```
+
+### Platform-Specific Behavior
+
+<Tabs>
+  <Tab title="macOS">
+    On macOS, DeerFlow automatically prefers **Apple Container** if available, with fallback to Docker:
+    
+    1. Checks for Apple Container runtime
+    2. Falls back to Docker if not available
+    
+    No configuration changes needed - the provider handles this automatically.
+  </Tab>
+  
+  <Tab title="Linux">
+    Uses Docker for containerization. Ensure Docker is installed and running:
+    
+    ```bash
+    # Install Docker
+    curl -fsSL https://get.docker.com -o get-docker.sh
+    sudo sh get-docker.sh
+    
+    # Start Docker
+    sudo systemctl start docker
+    ```
+  </Tab>
+  
+  <Tab title="Windows">
+    Requires Docker Desktop for Windows. Install from [docker.com](https://www.docker.com/products/docker-desktop/).
+    
+    <Warning>
+      Ensure WSL 2 backend is enabled in Docker Desktop settings for best performance.
+    </Warning>
+  </Tab>
+</Tabs>
+
+### Volume Mounts
+
+The Docker sandbox automatically mounts:
+
+1. **Skills directory**: From `skills.path` to `skills.container_path` (read-only)
+2. **Thread workspace**: Per-thread working directory
+3. **Custom mounts**: Additional directories specified in `mounts`
+
+```yaml config.yaml
+skills:
+  path: /absolute/path/to/skills  # Host path
+  container_path: /mnt/skills     # Container path
+
+sandbox:
+  use: src.community.aio_sandbox:AioSandboxProvider
+  mounts:
+    # Additional custom mount
+    - host_path: /home/user/data
+      container_path: /data
+      read_only: true
+```
+
+### Environment Variables in Container
+
+Inject environment variables into the sandbox:
+
+```yaml config.yaml
+sandbox:
+  use: src.community.aio_sandbox:AioSandboxProvider
+  environment:
+    # Static values
+    NODE_ENV: production
+    DEBUG: "false"
+    
+    # Resolved from host environment
+    OPENAI_API_KEY: $OPENAI_API_KEY
+    DATABASE_URL: $DATABASE_URL
+    
+    # Mix of both
+    API_URL: https://api.example.com
+    API_KEY: $API_KEY
+```
+
+<Info>
+  Environment variables prefixed with `$` are resolved from the **host** environment when DeerFlow starts.
+</Info>
+
+## Kubernetes Sandbox (Provisioner)
+
+Production-grade sandbox using Kubernetes pods managed by a provisioner service. Each `sandbox_id` gets a dedicated pod.
+
+### Configuration
+
+```yaml config.yaml
+sandbox:
+  use: src.community.aio_sandbox:AioSandboxProvider
+  provisioner_url: http://provisioner:8002
+```
+
+### Architecture
+
+```
+┌─────────────────┐
+│   DeerFlow      │
+│   Backend       │
+└────────┬────────┘
+         │
+         │ HTTP API
+         ▼
+┌─────────────────┐
+│  Provisioner    │
+│   Service       │
+└────────┬────────┘
+         │
+         │ Kubernetes API
+         ▼
+┌─────────────────┐
+│   k3s/k8s       │
+│   Cluster       │
+│                 │
+│ ┌─────────────┐ │
+│ │  Pod 1      │ │
+│ │ (thread-1)  │ │
+│ └─────────────┘ │
+│ ┌─────────────┐ │
+│ │  Pod 2      │ │
+│ │ (thread-2)  │ │
+│ └─────────────┘ │
+└─────────────────┘
+```
+
+### Characteristics
+
+<Icon icon="check" /> Full isolation - each thread gets its own pod  
+<Icon icon="check" /> Scalable - handles many concurrent threads  
+<Icon icon="check" /> Resource limits - CPU and memory controls  
+<Icon icon="check" /> Production-ready - managed lifecycle  
+<Icon icon="xmark" /> Complex setup - requires Kubernetes and provisioner
+
+### Use Cases
+
+- Production deployments
+- Multi-tenant environments
+- High concurrency requirements
+- Environments requiring strict isolation
+- Cloud deployments
+
+### Provisioner Setup
+
+The provisioner is a separate service that manages Kubernetes pods. See the [provisioner documentation](https://github.com/your-repo/provisioner) for setup instructions.
+
+## Comparison Matrix
+
+| Feature | Local | Docker | Kubernetes |
+|---------|-------|--------|------------|
+| Isolation | ❌ None | ✅ Container | ✅✅ Pod |
+| Setup Complexity | ✅ Simple | ⚠️ Moderate | ❌ Complex |
+| Performance | ✅✅ Fast | ✅ Good | ⚠️ Moderate |
+| Scalability | ⚠️ Limited | ✅ Good | ✅✅ Excellent |
+| Security | ❌ Low | ✅ High | ✅✅ Highest |
+| Resource Control | ❌ No | ⚠️ Basic | ✅ Advanced |
+| Production Ready | ❌ No | ⚠️ Yes | ✅ Yes |
+
+## Recommendations
+
+<AccordionGroup>
+  <Accordion title="Development" icon="laptop-code">
+    Use **Docker sandbox** for the best balance of isolation and convenience:
+    
+    ```yaml
+    sandbox:
+      use: src.community.aio_sandbox:AioSandboxProvider
+    ```
+  </Accordion>
+  
+  <Accordion title="Production (Single-user)" icon="server">
+    Use **Docker sandbox** with explicit configuration:
+    
+    ```yaml
+    sandbox:
+      use: src.community.aio_sandbox:AioSandboxProvider
+      idle_timeout: 1800  # 30 minutes
+      environment:
+        NODE_ENV: production
+    ```
+  </Accordion>
+  
+  <Accordion title="Production (Multi-tenant)" icon="users">
+    Use **Kubernetes sandbox** with provisioner:
+    
+    ```yaml
+    sandbox:
+      use: src.community.aio_sandbox:AioSandboxProvider
+      provisioner_url: http://provisioner:8002
+    ```
+  </Accordion>
+  
+  <Accordion title="Quick Testing" icon="flask">
+    Use **local sandbox** for rapid iteration:
+    
+    ```yaml
+    sandbox:
+      use: src.sandbox.local:LocalSandboxProvider
+    ```
+    
+    <Warning>
+      Never use local sandbox with untrusted input or in production.
+    </Warning>
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Docker container fails to start" icon="triangle-exclamation">
+    Check Docker is running and accessible:
+    
+    ```bash
+    # Check Docker status
+    docker ps
+    
+    # Pull the sandbox image
+    docker pull enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+    
+    # Test manual start
+    docker run -p 8080:8080 enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+    ```
+  </Accordion>
+  
+  <Accordion title="Permission denied on volume mounts" icon="triangle-exclamation">
+    Ensure the host paths exist and have correct permissions:
+    
+    ```bash
+    # Check path exists
+    ls -la /path/to/mount
+    
+    # Fix permissions
+    chmod 755 /path/to/mount
+    ```
+  </Accordion>
+  
+  <Accordion title="Environment variables not resolved" icon="triangle-exclamation">
+    Verify environment variables are set on the host:
+    
+    ```bash
+    # Check variable is set
+    echo $MY_API_KEY
+    
+    # Add to .env if missing
+    echo "MY_API_KEY=value" >> .env
+    ```
+  </Accordion>
+  
+  <Accordion title="Container idle timeout too aggressive" icon="triangle-exclamation">
+    Increase the idle timeout or disable it:
+    
+    ```yaml
+    sandbox:
+      use: src.community.aio_sandbox:AioSandboxProvider
+      idle_timeout: 3600  # 1 hour
+      # OR
+      idle_timeout: 0     # Disable timeout
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Skills Configuration" icon="puzzle-piece" href="/configuration/skills-and-mcp">
+    Configure skills and MCP servers
+  </Card>
+  <Card title="Tools Reference" icon="wrench" href="/reference/tools">
+    Explore available tools
+  </Card>
+</CardGroup>

@@ -1,0 +1,209 @@
+---
+title: Built-in Tools
+description: Core agent tools for file presentation, clarification, and image viewing
+---
+
+## Overview
+
+Built-in tools provide essential functionality for agent interactions with users. These tools handle file presentation, user clarification, and image viewing capabilities.
+
+## present_files
+
+Make files visible to the user for viewing and rendering in the client interface.
+
+### Parameters
+
+<ParamField path="filepaths" type="list[str]" required>
+  List of absolute file paths to present to the user. **Only** files in `/mnt/user-data/outputs` can be presented.
+</ParamField>
+
+### When to Use
+
+- Making any file available for the user to view, download, or interact with
+- Presenting multiple related files at once
+- After creating files that should be presented to the user
+
+### When NOT to Use
+
+- When you only need to read file contents for your own processing
+- For temporary or intermediate files not meant for user viewing
+
+### Example
+
+```python
+from langchain.tools import tool
+
+# Present a generated report to the user
+present_files(
+    filepaths=["/mnt/user-data/outputs/report.pdf"]
+)
+
+# Present multiple related files
+present_files(
+    filepaths=[
+        "/mnt/user-data/outputs/chart1.png",
+        "/mnt/user-data/outputs/chart2.png",
+        "/mnt/user-data/outputs/analysis.csv"
+    ]
+)
+```
+
+### Notes
+
+- Call this tool after creating files and moving them to `/mnt/user-data/outputs`
+- Can be safely called in parallel with other tools
+- State updates are handled by a reducer to prevent conflicts
+
+### Return Type
+
+Returns a `Command` object with:
+- Updated artifacts list
+- Success message via `ToolMessage`
+
+---
+
+## ask_clarification
+
+Ask the user for clarification when you need more information to proceed.
+
+### Parameters
+
+<ParamField path="question" type="str" required>
+  The clarification question to ask the user. Be specific and clear.
+</ParamField>
+
+<ParamField path="clarification_type" type="Literal" required>
+  The type of clarification needed. Options:
+  - `missing_info`: Required details not provided
+  - `ambiguous_requirement`: Multiple valid interpretations exist
+  - `approach_choice`: Several valid approaches exist
+  - `risk_confirmation`: Destructive actions need confirmation
+  - `suggestion`: Recommendation needs user approval
+</ParamField>
+
+<ParamField path="context" type="str" optional>
+  Optional context explaining why clarification is needed. Helps the user understand the situation.
+</ParamField>
+
+<ParamField path="options" type="list[str]" optional>
+  Optional list of choices for approach_choice or suggestion types. Present clear options for the user to choose from.
+</ParamField>
+
+### When to Use
+
+- You need information that wasn't provided in the user's request
+- The requirement can be interpreted in multiple ways
+- Multiple valid implementation approaches exist
+- You're about to perform a potentially dangerous operation
+- You have a recommendation but need user approval
+
+### Best Practices
+
+- Ask ONE clarification at a time for clarity
+- Be specific and clear in your question
+- Don't make assumptions when clarification is needed
+- For risky operations, ALWAYS ask for confirmation
+- Execution will be interrupted automatically after calling this tool
+
+### Examples
+
+```python
+# Missing information
+ask_clarification(
+    question="Which directory should I use for the output files?",
+    clarification_type="missing_info",
+    context="You mentioned generating reports, but didn't specify the output location."
+)
+
+# Approach choice
+ask_clarification(
+    question="Which format would you prefer for the export?",
+    clarification_type="approach_choice",
+    context="The data can be exported in multiple formats.",
+    options=["CSV", "JSON", "Excel"]
+)
+
+# Risk confirmation
+ask_clarification(
+    question="Are you sure you want to delete all files in the directory?",
+    clarification_type="risk_confirmation",
+    context="This operation is irreversible and will delete 150 files."
+)
+```
+
+### Return Type
+
+Returns a string (placeholder). Actual logic is handled by `ClarificationMiddleware` which intercepts the tool call and interrupts execution to present the question to the user.
+
+---
+
+## view_image
+
+Read an image file and make it available for display.
+
+### Parameters
+
+<ParamField path="image_path" type="str" required>
+  Absolute path to the image file. Common formats supported: jpg, jpeg, png, webp.
+</ParamField>
+
+### When to Use
+
+- When you need to view an image file
+
+### When NOT to Use
+
+- For non-image files (use `present_files` instead)
+- For multiple files at once (use `present_files` instead)
+
+### Supported Formats
+
+- JPG/JPEG (`.jpg`, `.jpeg`)
+- PNG (`.png`)
+- WebP (`.webp`)
+
+### Example
+
+```python
+# View a generated chart
+view_image(
+    image_path="/mnt/user-data/outputs/chart.png"
+)
+
+# View an uploaded image
+view_image(
+    image_path="/mnt/user-data/uploads/photo.jpg"
+)
+```
+
+### Validation
+
+The tool validates:
+- Path is absolute
+- File exists
+- Path points to a file (not a directory)
+- File extension is supported
+
+### Error Handling
+
+Returns error messages for:
+- Non-absolute paths
+- Missing files
+- Invalid file types
+- Unsupported image formats
+- Read permissions issues
+
+### Return Type
+
+Returns a `Command` object with:
+- Updated `viewed_images` state containing base64-encoded image data
+- MIME type information
+- Success/error message via `ToolMessage`
+
+### Technical Details
+
+- Images are read as binary data
+- Converted to base64 encoding for transport
+- MIME type is detected from file extension
+- Virtual paths (`/mnt/user-data/*`) are mapped to thread-specific directories
+- The `merge_viewed_images` reducer handles merging with existing images

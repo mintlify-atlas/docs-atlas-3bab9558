@@ -1,0 +1,566 @@
+---
+title: Custom Tools
+description: Add custom tools to extend DeerFlow's capabilities
+---
+
+## Overview
+
+DeerFlow's tool system is fully extensible. You can add custom tools by:
+
+1. **Configuring built-in tools** - Customize existing tools in `config.yaml`
+2. **Creating Python tools** - Write custom tool functions
+3. **Using MCP servers** - Integrate external tools via Model Context Protocol
+
+<Info>
+  Tools are the atomic actions the agent can perform. Skills provide higher-level workflows that use these tools.
+</Info>
+
+## Tool Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Tool Sources                            │
+└─────────────────────────────────────────────────────────────┘
+
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+│  Built-in Tools  │  │ Configured Tools │  │   MCP Tools      │
+│  (src/tools/)    │  │  (config.yaml)   │  │ (extensions.json)│
+├──────────────────┤  ├──────────────────┤  ├──────────────────┤
+│ - present_file   │  │ - web_search     │  │ - github         │
+│ - clarification  │  │ - web_fetch      │  │ - filesystem     │
+│ - view_image     │  │ - bash           │  │ - postgres       │
+│                  │  │ - read_file      │  │ - brave-search   │
+│                  │  │ - write_file     │  │ - ...            │
+└──────────────────┘  └──────────────────┘  └──────────────────┘
+           │                   │                    │
+           └───────────────────┴────────────────────┘
+                              │
+                              ▼
+                 ┌─────────────────────────┐
+                 │  get_available_tools()  │
+                 │   (src/tools/__init__)  │
+                 └─────────────────────────┘
+```
+
+## Built-in Tools
+
+DeerFlow includes several built-in tools that are always available:
+
+<CardGroup cols={2}>
+  <Card title="present_file" icon="file">
+    Present files to the user as downloadable artifacts
+  </Card>
+  
+  <Card title="ask_clarification" icon="circle-question">
+    Ask user for clarification when information is missing
+  </Card>
+  
+  <Card title="view_image" icon="image">
+    View and analyze images using vision models
+  </Card>
+  
+  <Card title="skill" icon="wand-magic-sparkles">
+    Load additional skills dynamically
+  </Card>
+</CardGroup>
+
+## Configuring Tools in config.yaml
+
+### Tool Groups
+
+Organize tools into logical groups:
+
+```yaml config.yaml
+tool_groups:
+  - name: web          # Web operations
+  - name: file:read    # Read-only file operations
+  - name: file:write   # Write file operations
+  - name: bash         # Shell execution
+```
+
+### Adding Tools
+
+Define tools using the `use` reflection system:
+
+```yaml config.yaml
+tools:
+  # Web search using Tavily
+  - name: web_search
+    group: web
+    use: src.community.tavily.tools:web_search_tool
+    max_results: 5
+    # api_key: $TAVILY_API_KEY  # Optional override
+
+  # Web content fetching using Jina AI
+  - name: web_fetch
+    group: web
+    use: src.community.jina_ai.tools:web_fetch_tool
+    timeout: 10
+
+  # Image search
+  - name: image_search
+    group: web
+    use: src.community.image_search.tools:image_search_tool
+    max_results: 5
+
+  # File operations
+  - name: ls
+    group: file:read
+    use: src.sandbox.tools:ls_tool
+
+  - name: read_file
+    group: file:read
+    use: src.sandbox.tools:read_file_tool
+
+  - name: write_file
+    group: file:write
+    use: src.sandbox.tools:write_file_tool
+
+  - name: str_replace
+    group: file:write
+    use: src.sandbox.tools:str_replace_tool
+
+  # Shell execution
+  - name: bash
+    group: bash
+    use: src.sandbox.tools:bash_tool
+```
+
+### The `use` Reflection System
+
+The `use` field uses Python's reflection to dynamically load tools:
+
+**Format**: `module.path:function_or_class_name`
+
+<Steps>
+  <Step title="Module Path">
+    Python module path using dot notation:
+    ```
+    src.community.tavily.tools
+    ```
+  </Step>
+  
+  <Step title="Separator">
+    Colon (`:`) separates module from function/class:
+    ```
+    src.community.tavily.tools:web_search_tool
+    ```
+  </Step>
+  
+  <Step title="Function/Class">
+    The function or class to import:
+    ```python
+    # In src/community/tavily/tools.py
+    def web_search_tool(max_results: int = 5):
+        ...
+    ```
+  </Step>
+</Steps>
+
+## Creating Custom Python Tools
+
+<Steps>
+  <Step title="Create Tool File">
+    Create a Python file for your tool:
+    
+    ```python backend/src/tools/custom/calculator.py
+    """Custom calculator tool."""
+    from langchain_core.tools import tool
+    
+    @tool
+    def calculator(expression: str) -> float:
+        """Evaluate a mathematical expression.
+        
+        Args:
+            expression: Mathematical expression to evaluate (e.g., "2 + 2", "10 * 5")
+            
+        Returns:
+            The result of the calculation
+        """
+        try:
+            # Safe evaluation of mathematical expressions
+            result = eval(expression, {"__builtins__": {}}, {})
+            return float(result)
+        except Exception as e:
+            return f"Error: {str(e)}"
+    ```
+    
+    <Warning>
+      Using `eval()` can be dangerous. This example restricts it to mathematical operations only. For production use, consider using `ast.literal_eval()` or a proper expression parser.
+    </Warning>
+  </Step>
+  
+  <Step title="Add to config.yaml">
+    Register your tool in the configuration:
+    
+    ```yaml config.yaml
+    tools:
+      - name: calculator
+        group: utility
+        use: src.tools.custom.calculator:calculator
+    ```
+  </Step>
+  
+  <Step title="Test the Tool">
+    Restart DeerFlow and test your tool:
+    
+    ```bash
+    make dev
+    ```
+    
+    Ask the agent:
+    - "Calculate 25 * 4"
+    - "What is 100 divided by 5?"
+  </Step>
+</Steps>
+
+## Tool with Configuration
+
+Create tools that accept configuration parameters:
+
+```python backend/src/tools/custom/weather.py
+from langchain_core.tools import tool
+import os
+
+def create_weather_tool(api_key: str = None, units: str = "metric"):
+    """Factory function to create weather tool with config."""
+    
+    api_key = api_key or os.getenv("WEATHER_API_KEY")
+    
+    @tool
+    def get_weather(location: str) -> str:
+        """Get current weather for a location.
+        
+        Args:
+            location: City name or coordinates
+            
+        Returns:
+            Weather information
+        """
+        # Call weather API with api_key and units
+        # Implementation here...
+        return f"Weather for {location}: Sunny, 22°C"
+    
+    return get_weather
+```
+
+Configure in `config.yaml`:
+
+```yaml config.yaml
+tools:
+  - name: weather
+    group: web
+    use: src.tools.custom.weather:create_weather_tool
+    api_key: $WEATHER_API_KEY
+    units: imperial  # or metric
+```
+
+## Sandbox-Aware Tools
+
+Tools that interact with the filesystem should use the sandbox:
+
+```python backend/src/tools/custom/file_analyzer.py
+from langchain_core.tools import tool
+from src.sandbox.provider import get_sandbox
+
+@tool
+def analyze_file(filepath: str, sandbox_id: str = "local") -> dict:
+    """Analyze a file and return statistics.
+    
+    Args:
+        filepath: Path to file in sandbox (e.g., /mnt/user-data/uploads/file.txt)
+        sandbox_id: Sandbox identifier
+        
+    Returns:
+        File statistics
+    """
+    sandbox = get_sandbox(sandbox_id)
+    
+    # Read file through sandbox
+    content = sandbox.read_file(filepath)
+    
+    # Analyze content
+    stats = {
+        "size": len(content),
+        "lines": len(content.splitlines()),
+        "words": len(content.split()),
+    }
+    
+    return stats
+```
+
+<Info>
+  Always use sandbox methods for file operations to ensure compatibility with both local and Docker sandbox modes.
+</Info>
+
+## Tool Parameters and Type Hints
+
+LangChain uses type hints and docstrings to generate tool schemas:
+
+<CodeGroup>
+```python Type Hints
+from typing import Optional, List
+from langchain_core.tools import tool
+
+@tool
+def search_database(
+    query: str,
+    limit: int = 10,
+    filters: Optional[List[str]] = None
+) -> dict:
+    """Search database with filters.
+    
+    Args:
+        query: Search query string
+        limit: Maximum number of results (default: 10)
+        filters: Optional list of filter conditions
+        
+    Returns:
+        Search results as dictionary
+    """
+    # Implementation
+    pass
+```
+
+```python Pydantic Models
+from pydantic import BaseModel, Field
+from langchain_core.tools import tool
+
+class SearchParams(BaseModel):
+    """Parameters for database search."""
+    query: str = Field(description="Search query string")
+    limit: int = Field(default=10, description="Maximum results")
+    filters: Optional[List[str]] = Field(default=None, description="Filter conditions")
+
+@tool(args_schema=SearchParams)
+def search_database(query: str, limit: int = 10, filters: Optional[List[str]] = None) -> dict:
+    """Search database with filters."""
+    # Implementation
+    pass
+```
+</CodeGroup>
+
+## Environment Variables in Tools
+
+Access environment variables securely:
+
+```python
+import os
+from langchain_core.tools import tool
+
+@tool
+def api_call(endpoint: str) -> dict:
+    """Make API call to external service."""
+    api_key = os.getenv("EXTERNAL_API_KEY")
+    
+    if not api_key:
+        return {"error": "API key not configured"}
+    
+    # Make API call
+    # ...
+```
+
+Set in `.env`:
+
+```bash .env
+EXTERNAL_API_KEY=your-api-key-here
+```
+
+## Tool Visibility and Access Control
+
+Control which tools are available:
+
+### Tool Groups
+
+Restrict tools by group in skills:
+
+```yaml SKILL.md
+---
+name: data-analysis
+allowed-tools:
+  - file:read
+  - bash
+---
+```
+
+### Conditional Tool Loading
+
+Load tools based on configuration:
+
+```python backend/src/tools/__init__.py
+from typing import List
+from langchain_core.tools import BaseTool
+
+def get_available_tools(config: dict) -> List[BaseTool]:
+    """Get available tools based on configuration."""
+    tools = []
+    
+    # Load configured tools
+    for tool_config in config.get("tools", []):
+        if tool_config.get("enabled", True):
+            tool = load_tool(tool_config)
+            tools.append(tool)
+    
+    return tools
+```
+
+## Testing Custom Tools
+
+<Tabs>
+  <Tab title="Unit Tests">
+    ```python backend/tests/test_custom_tools.py
+    import pytest
+    from src.tools.custom.calculator import calculator
+    
+    def test_calculator_addition():
+        result = calculator.invoke({"expression": "2 + 2"})
+        assert result == 4.0
+    
+    def test_calculator_multiplication():
+        result = calculator.invoke({"expression": "5 * 3"})
+        assert result == 15.0
+    
+    def test_calculator_error():
+        result = calculator.invoke({"expression": "invalid"})
+        assert "Error" in result
+    ```
+  </Tab>
+  
+  <Tab title="Integration Tests">
+    ```python backend/tests/test_tool_integration.py
+    import pytest
+    from src.tools import get_available_tools
+    from src.config import load_config
+    
+    def test_custom_tool_loaded():
+        config = load_config()
+        tools = get_available_tools(config)
+        
+        tool_names = [tool.name for tool in tools]
+        assert "calculator" in tool_names
+    
+    def test_tool_execution():
+        config = load_config()
+        tools = get_available_tools(config)
+        
+        calc_tool = next(t for t in tools if t.name == "calculator")
+        result = calc_tool.invoke({"expression": "10 / 2"})
+        assert result == 5.0
+    ```
+  </Tab>
+</Tabs>
+
+Run tests:
+
+```bash
+cd backend
+uv run pytest tests/test_custom_tools.py -v
+```
+
+## Debugging Tools
+
+<Steps>
+  <Step title="Add Logging">
+    ```python
+    import logging
+    from langchain_core.tools import tool
+    
+    logger = logging.getLogger(__name__)
+    
+    @tool
+    def my_tool(param: str) -> str:
+        logger.info(f"Tool called with param: {param}")
+        # Implementation
+        result = process(param)
+        logger.info(f"Tool returning: {result}")
+        return result
+    ```
+  </Step>
+  
+  <Step title="Check Tool Registration">
+    ```bash
+    # List available tools via API
+    curl http://localhost:2026/api/tools
+    ```
+  </Step>
+  
+  <Step title="Test Tool Directly">
+    ```python
+    # In Python REPL or script
+    from src.tools.custom.my_tool import my_tool
+    
+    result = my_tool.invoke({"param": "test"})
+    print(result)
+    ```
+  </Step>
+</Steps>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Clear Documentation">
+    Write detailed docstrings explaining:
+    - What the tool does
+    - When to use it
+    - Parameter requirements
+    - Return format
+    
+    The LLM uses these to decide when to call your tool.
+  </Accordion>
+  
+  <Accordion title="Error Handling">
+    Always handle errors gracefully:
+    ```python
+    @tool
+    def my_tool(param: str) -> dict:
+        try:
+            result = risky_operation(param)
+            return {"success": True, "data": result}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    ```
+  </Accordion>
+  
+  <Accordion title="Type Safety">
+    Use type hints and validation:
+    ```python
+    from pydantic import BaseModel, validator
+    
+    class ToolInput(BaseModel):
+        email: str
+        
+        @validator("email")
+        def validate_email(cls, v):
+            if "@" not in v:
+                raise ValueError("Invalid email")
+            return v
+    ```
+  </Accordion>
+  
+  <Accordion title="Performance">
+    - Cache expensive operations
+    - Set reasonable timeouts
+    - Return early for invalid inputs
+    - Use async for I/O-bound operations
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="MCP Servers" icon="plug" href="/guides/mcp-servers">
+    Integrate external tools via Model Context Protocol
+  </Card>
+  
+  <Card title="Creating Skills" icon="wand-magic-sparkles" href="/guides/creating-skills">
+    Combine tools into higher-level workflows
+  </Card>
+  
+  <Card title="Configuration" icon="gear" href="/configuration/tools">
+    Learn about tool configuration options
+  </Card>
+  
+  <Card title="Examples" icon="code" href="https://github.com/bytedance/deer-flow/tree/main/backend/src/tools">
+    Browse built-in tools for reference
+  </Card>
+</CardGroup>

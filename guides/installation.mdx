@@ -1,0 +1,311 @@
+---
+title: Installation
+description: Install DeerFlow and set up your development environment
+---
+
+## Prerequisites
+
+Before installing DeerFlow, ensure you have the required tools installed on your system.
+
+### Required Tools
+
+<AccordionGroup>
+  <Accordion title="Node.js 22+" icon="node-js">
+    DeerFlow requires Node.js version 22 or higher for the frontend development server.
+    
+    **Installation:**
+    - Download from [nodejs.org](https://nodejs.org/)
+    - Or use a version manager like [nvm](https://github.com/nvm-sh/nvm)
+    
+    **Verify installation:**
+    ```bash
+    node -v  # Should show v22.x.x or higher
+    ```
+  </Accordion>
+
+  <Accordion title="pnpm" icon="box">
+    pnpm is the package manager used for frontend dependencies.
+    
+    **Installation:**
+    ```bash
+    npm install -g pnpm
+    ```
+    
+    Or visit [pnpm.io/installation](https://pnpm.io/installation)
+    
+    **Verify installation:**
+    ```bash
+    pnpm -v
+    ```
+  </Accordion>
+
+  <Accordion title="uv (Python Package Manager)" icon="python">
+    uv is a fast Python package manager used for backend dependencies.
+    
+    **Installation:**
+    ```bash
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    ```
+    
+    Or visit [docs.astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation/)
+    
+    **Verify installation:**
+    ```bash
+    uv --version
+    ```
+  </Accordion>
+
+  <Accordion title="nginx" icon="server">
+    nginx is used as a reverse proxy to unify all services on port 2026.
+    
+    **Installation:**
+    <CodeGroup>
+    ```bash macOS
+    brew install nginx
+    ```
+    
+    ```bash Ubuntu/Debian
+    sudo apt install nginx
+    ```
+    
+    ```bash CentOS/RHEL
+    sudo yum install nginx
+    ```
+    </CodeGroup>
+    
+    Or visit [nginx.org/en/download.html](https://nginx.org/en/download.html)
+    
+    **Verify installation:**
+    ```bash
+    nginx -v
+    ```
+  </Accordion>
+
+  <Accordion title="Docker (Optional)" icon="docker">
+    Docker is required if you plan to use Docker-based sandbox execution or Docker development mode.
+    
+    **Installation:**
+    - Download [Docker Desktop](https://docs.docker.com/get-docker/)
+    - On macOS, you can also use [OrbStack](https://orbstack.dev/) as a lightweight alternative
+    
+    **Verify installation:**
+    ```bash
+    docker --version
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Quick Check
+
+DeerFlow provides a convenient command to verify all prerequisites:
+
+```bash
+make check
+```
+
+This will check for:
+- Node.js 22+
+- pnpm
+- uv
+- nginx
+
+And report which tools are missing or need to be updated.
+
+## Installation Steps
+
+<Steps>
+  <Step title="Clone the Repository">
+    Clone DeerFlow from GitHub:
+    
+    ```bash
+    git clone https://github.com/bytedance/deer-flow.git
+    cd deer-flow
+    ```
+  </Step>
+
+  <Step title="Generate Configuration Files">
+    Generate local configuration files from templates:
+    
+    ```bash
+    make config
+    ```
+    
+    This creates:
+    - `config.yaml` - Main configuration file
+    - `.env` - Environment variables
+    - `frontend/.env` - Frontend environment variables
+    
+    <Warning>
+      The `make config` command will abort if configuration files already exist to prevent overwriting your settings.
+    </Warning>
+  </Step>
+
+  <Step title="Configure Your Model">
+    Edit `config.yaml` and configure at least one LLM model:
+    
+    ```yaml config.yaml
+    models:
+      - name: gpt-4
+        display_name: GPT-4
+        use: langchain_openai:ChatOpenAI
+        model: gpt-4
+        api_key: $OPENAI_API_KEY
+        max_tokens: 4096
+        temperature: 0.7
+        supports_vision: true
+    ```
+    
+    See [Configuration Guide](/configuration/models) for more model options.
+  </Step>
+
+  <Step title="Set API Keys">
+    Set your API keys using one of these methods:
+    
+    <Tabs>
+      <Tab title=".env File (Recommended)">
+        Edit the `.env` file in the project root:
+        
+        ```bash .env
+        OPENAI_API_KEY=your-openai-api-key
+        TAVILY_API_KEY=your-tavily-api-key
+        # Add other provider keys as needed
+        ```
+      </Tab>
+      
+      <Tab title="Environment Variables">
+        Export environment variables in your shell:
+        
+        ```bash
+        export OPENAI_API_KEY=your-openai-api-key
+        export TAVILY_API_KEY=your-tavily-api-key
+        ```
+      </Tab>
+      
+      <Tab title="config.yaml (Not Recommended)">
+        Directly in `config.yaml` (not recommended for production):
+        
+        ```yaml
+        models:
+          - name: gpt-4
+            api_key: your-actual-api-key-here
+        ```
+        
+        <Warning>
+          Never commit API keys to version control. Use environment variables instead.
+        </Warning>
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Install Dependencies">
+    Install both frontend and backend dependencies:
+    
+    ```bash
+    make install
+    ```
+    
+    This runs:
+    - `cd backend && uv sync` - Install Python dependencies
+    - `cd frontend && pnpm install` - Install Node.js dependencies
+  </Step>
+
+  <Step title="(Optional) Pre-pull Sandbox Image">
+    If you plan to use Docker-based sandbox execution, pre-pull the container image:
+    
+    ```bash
+    make setup-sandbox
+    ```
+    
+    This downloads the sandbox container image:
+    ```
+    enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+    ```
+    
+    <Info>
+      This step is optional but recommended. It ensures the sandbox image is available when you need it, avoiding delays during first use.
+    </Info>
+  </Step>
+</Steps>
+
+## Verify Installation
+
+Start the development server to verify everything is working:
+
+```bash
+make dev
+```
+
+You should see output indicating all services have started:
+
+```
+==========================================
+  DeerFlow is ready!
+==========================================
+
+  🌐 Application: http://localhost:2026
+  📡 API Gateway: http://localhost:2026/api/*
+  🤖 LangGraph:   http://localhost:2026/api/langgraph/*
+```
+
+Open [http://localhost:2026](http://localhost:2026) in your browser to access DeerFlow.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Docker Setup" icon="docker" href="/guides/docker-setup">
+    Set up Docker development environment for isolated services
+  </Card>
+  
+  <Card title="Local Development" icon="code" href="/guides/local-development">
+    Learn about running services locally and development workflow
+  </Card>
+  
+  <Card title="Configuration" icon="gear" href="/configuration/overview">
+    Explore configuration options for models, tools, and sandbox
+  </Card>
+  
+  <Card title="Creating Skills" icon="wand-magic-sparkles" href="/guides/creating-skills">
+    Extend DeerFlow with custom skills
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="make check fails with missing tools">
+    Install the missing tools as indicated by the error message. Each tool has specific installation instructions shown in the output.
+  </Accordion>
+
+  <Accordion title="Config file not found error">
+    Ensure `config.yaml` exists in the project root directory:
+    ```bash
+    ls config.yaml
+    ```
+    
+    If missing, run:
+    ```bash
+    make config
+    ```
+  </Accordion>
+
+  <Accordion title="Invalid API key error">
+    Verify your API keys are correctly set:
+    - Check `.env` file has the correct keys
+    - Ensure environment variables are exported
+    - Verify the API key is valid with your provider
+  </Accordion>
+
+  <Accordion title="Port already in use">
+    If port 2026, 8001, 3000, or 2024 is already in use:
+    
+    1. Stop any existing DeerFlow processes:
+       ```bash
+       make stop
+       ```
+    
+    2. Find and kill the process using the port:
+       ```bash
+       lsof -ti:2026 | xargs kill -9
+       ```
+  </Accordion>
+</AccordionGroup>

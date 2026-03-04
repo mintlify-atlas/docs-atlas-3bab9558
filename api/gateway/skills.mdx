@@ -1,0 +1,410 @@
+---
+title: 'Skills API'
+description: 'Manage skills and their enabled status'
+---
+
+## Overview
+
+The Skills API provides endpoints to list, retrieve, enable/disable, and install skills. Skills are extensions that provide specialized instructions and workflows to AI agents.
+
+## List All Skills
+
+<Card title="GET /api/skills" icon="list">
+  Retrieve a list of all available skills from both public and custom directories
+</Card>
+
+### Response
+
+<ResponseField name="skills" type="array">
+  List of all skills regardless of enabled status
+  
+  <Expandable title="Skill Object">
+    <ResponseField name="name" type="string" required>
+      Name of the skill (hyphen-case format)
+    </ResponseField>
+    
+    <ResponseField name="description" type="string" required>
+      Description of what the skill does
+    </ResponseField>
+    
+    <ResponseField name="license" type="string">
+      License information (e.g., MIT, Apache-2.0)
+    </ResponseField>
+    
+    <ResponseField name="category" type="string" required>
+      Category of the skill: `public` or `custom`
+    </ResponseField>
+    
+    <ResponseField name="enabled" type="boolean" default="true">
+      Whether this skill is enabled
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Request
+
+```bash
+curl http://localhost:8001/api/skills
+```
+
+### Example Response
+
+```json
+{
+  "skills": [
+    {
+      "name": "mintlify",
+      "description": "Comprehensive reference for building Mintlify documentation sites",
+      "license": "MIT",
+      "category": "public",
+      "enabled": true
+    },
+    {
+      "name": "pdf-processing",
+      "description": "Extract and analyze PDF content",
+      "license": null,
+      "category": "custom",
+      "enabled": false
+    }
+  ]
+}
+```
+
+---
+
+## Get Skill Details
+
+<Card title="GET /api/skills/{skill_name}" icon="circle-info">
+  Retrieve detailed information about a specific skill by its name
+</Card>
+
+### Path Parameters
+
+<ParamField path="skill_name" type="string" required>
+  The name of the skill to retrieve
+</ParamField>
+
+### Response
+
+<ResponseField name="name" type="string" required>
+  Name of the skill
+</ResponseField>
+
+<ResponseField name="description" type="string" required>
+  Description of what the skill does
+</ResponseField>
+
+<ResponseField name="license" type="string">
+  License information
+</ResponseField>
+
+<ResponseField name="category" type="string" required>
+  Category: `public` or `custom`
+</ResponseField>
+
+<ResponseField name="enabled" type="boolean" required>
+  Whether this skill is enabled
+</ResponseField>
+
+### Example Request
+
+```bash
+curl http://localhost:8001/api/skills/mintlify
+```
+
+### Example Response
+
+```json
+{
+  "name": "mintlify",
+  "description": "Comprehensive reference for building Mintlify documentation sites",
+  "license": "MIT",
+  "category": "public",
+  "enabled": true
+}
+```
+
+### Error Responses
+
+<ResponseField name="404" type="Not Found">
+  Skill not found
+  
+  ```json
+  {
+    "detail": "Skill 'invalid-skill' not found"
+  }
+  ```
+</ResponseField>
+
+---
+
+## Update Skill
+
+<Card title="PUT /api/skills/{skill_name}" icon="pen-to-square">
+  Update a skill's enabled status by modifying the extensions_config.json file
+</Card>
+
+### Path Parameters
+
+<ParamField path="skill_name" type="string" required>
+  The name of the skill to update
+</ParamField>
+
+### Request Body
+
+<ParamField body="enabled" type="boolean" required>
+  Whether to enable or disable the skill
+</ParamField>
+
+### Response
+
+Returns the updated skill object (same as GET /api/skills/{skill_name}).
+
+### Example Request
+
+```bash
+curl -X PUT http://localhost:8001/api/skills/mintlify \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enabled": false
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "name": "mintlify",
+  "description": "Comprehensive reference for building Mintlify documentation sites",
+  "license": "MIT",
+  "category": "public",
+  "enabled": false
+}
+```
+
+### Error Responses
+
+<ResponseField name="404" type="Not Found">
+  Skill not found
+</ResponseField>
+
+<ResponseField name="500" type="Internal Server Error">
+  Failed to update skill configuration
+</ResponseField>
+
+### Notes
+
+- This endpoint modifies the `extensions_config.json` file
+- The SKILL.md file itself is not modified
+- Changes take effect immediately for new conversations
+
+---
+
+## Install Skill
+
+<Card title="POST /api/skills/install" icon="download">
+  Install a skill from a .skill file (ZIP archive) located in the thread's user-data directory
+</Card>
+
+### Request Body
+
+<ParamField body="thread_id" type="string" required>
+  The thread ID where the .skill file is located
+</ParamField>
+
+<ParamField body="path" type="string" required>
+  Virtual path to the .skill file (e.g., `/mnt/user-data/outputs/my-skill.skill`)
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Whether the installation was successful
+</ResponseField>
+
+<ResponseField name="skill_name" type="string" required>
+  Name of the installed skill
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Installation result message
+</ResponseField>
+
+### Example Request
+
+```bash
+curl -X POST http://localhost:8001/api/skills/install \
+  -H "Content-Type: application/json" \
+  -d '{
+    "thread_id": "abc123-def456",
+    "path": "/mnt/user-data/outputs/my-skill.skill"
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "skill_name": "my-skill",
+  "message": "Skill 'my-skill' installed successfully"
+}
+```
+
+### Error Responses
+
+<ResponseField name="400" type="Bad Request">
+  Invalid .skill file or validation error
+  
+  ```json
+  {
+    "detail": "Invalid skill: Missing 'name' in frontmatter"
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="403" type="Forbidden">
+  Access denied (path traversal detected)
+</ResponseField>
+
+<ResponseField name="404" type="Not Found">
+  Skill file not found
+  
+  ```json
+  {
+    "detail": "Skill file not found: /mnt/user-data/outputs/my-skill.skill"
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="409" type="Conflict">
+  Skill already exists
+  
+  ```json
+  {
+    "detail": "Skill 'my-skill' already exists. Please remove it first or use a different name."
+  }
+  ```
+</ResponseField>
+
+### .skill File Format
+
+A `.skill` file is a ZIP archive containing:
+
+- **SKILL.md** (required): Markdown file with YAML frontmatter
+- **scripts/**: Optional directory with executable scripts
+- **references/**: Optional directory with reference documentation
+- **assets/**: Optional directory with images, templates, etc.
+
+#### SKILL.md Frontmatter
+
+```yaml
+---
+name: my-skill
+description: Description of what this skill does
+license: MIT
+allowed-tools:
+  - read
+  - write
+  - bash
+metadata:
+  author: Your Name
+  version: 1.0.0
+---
+
+# Skill Instructions
+
+Your skill content here...
+```
+
+#### Naming Requirements
+
+- Must be hyphen-case (lowercase letters, digits, and hyphens only)
+- Cannot start or end with hyphen
+- Cannot contain consecutive hyphens
+- Maximum 64 characters
+- Must be unique (no duplicates)
+
+### Validation Rules
+
+The API validates:
+
+1. **File extension**: Must be `.skill`
+2. **ZIP format**: Must be a valid ZIP archive
+3. **SKILL.md exists**: Required file with frontmatter
+4. **Required fields**: `name` and `description` in frontmatter
+5. **Name format**: Must follow hyphen-case convention
+6. **Description**: No angle brackets, max 1024 characters
+7. **No duplicates**: Skill name must not already exist
+
+---
+
+## Skill Categories
+
+### Public Skills
+
+Public skills are bundled with DeerFlow and located in the `skills/public/` directory. These are maintained by the DeerFlow team.
+
+### Custom Skills
+
+Custom skills are user-created and installed in the `skills/custom/` directory. These can be installed via the API or manually placed in the directory.
+
+---
+
+## Use Cases
+
+### List Available Skills
+
+```typescript
+const response = await fetch('http://localhost:8001/api/skills');
+const { skills } = await response.json();
+
+// Filter by category
+const publicSkills = skills.filter(s => s.category === 'public');
+const customSkills = skills.filter(s => s.category === 'custom');
+
+// Filter enabled skills
+const enabledSkills = skills.filter(s => s.enabled);
+```
+
+### Toggle Skill Status
+
+```typescript
+async function toggleSkill(skillName: string, enabled: boolean) {
+  const response = await fetch(`http://localhost:8001/api/skills/${skillName}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled })
+  });
+  return response.json();
+}
+```
+
+### Install Custom Skill
+
+```typescript
+async function installSkill(threadId: string, skillPath: string) {
+  const response = await fetch('http://localhost:8001/api/skills/install', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      thread_id: threadId,
+      path: skillPath
+    })
+  });
+  return response.json();
+}
+```
+
+---
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Creating Skills" icon="hammer" href="/customize/skills">
+    Learn how to create custom skills
+  </Card>
+  <Card title="Gateway Overview" icon="book" href="/api/gateway/overview">
+    Learn about the Gateway API
+  </Card>
+</CardGroup>

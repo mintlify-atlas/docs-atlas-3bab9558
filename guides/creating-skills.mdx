@@ -1,0 +1,404 @@
+---
+title: Creating Skills
+description: Extend DeerFlow with custom skills for specialized workflows
+---
+
+## What are Skills?
+
+Skills are modular, self-contained packages that extend DeerFlow's capabilities by providing specialized knowledge, workflows, and tools. Think of them as "onboarding guides" for specific domains or tasks.
+
+### What Skills Provide
+
+<CardGroup cols={2}>
+  <Card title="Specialized Workflows" icon="diagram-project">
+    Multi-step procedures for specific domains
+  </Card>
+  
+  <Card title="Tool Integrations" icon="plug">
+    Instructions for working with specific file formats or APIs
+  </Card>
+  
+  <Card title="Domain Expertise" icon="brain">
+    Company-specific knowledge, schemas, business logic
+  </Card>
+  
+  <Card title="Bundled Resources" icon="box">
+    Scripts, references, and assets for complex tasks
+  </Card>
+</CardGroup>
+
+## Skill Structure
+
+Every skill consists of a required `SKILL.md` file and optional bundled resources:
+
+```
+skill-name/
+├── SKILL.md (required)
+│   ├── YAML frontmatter
+│   │   ├── name: (required)
+│   │   └── description: (required)
+│   └── Markdown instructions
+└── Bundled Resources (optional)
+    ├── scripts/          - Executable code
+    ├── references/       - Documentation
+    └── assets/           - Output resources
+```
+
+### SKILL.md Format
+
+Every `SKILL.md` consists of:
+
+<Steps>
+  <Step title="Frontmatter (YAML)">
+    Contains `name` and `description` fields - the only fields DeerFlow reads to determine when to use the skill.
+    
+    ```yaml
+    ---
+    name: pdf-processing
+    description: Handle PDF documents efficiently. Use when working with PDF files for extraction, rotation, merging, or analysis.
+    ---
+    ```
+    
+    <Warning>
+      The description is critical - it's the primary triggering mechanism. Include both what the skill does and when to use it.
+    </Warning>
+  </Step>
+  
+  <Step title="Body (Markdown)">
+    Instructions and guidance loaded AFTER the skill triggers.
+    
+    ```markdown
+    # PDF Processing Skill
+    
+    ## Quick Start
+    
+    Extract text from PDF:
+    [code example]
+    
+    ## Advanced Features
+    ...
+    ```
+  </Step>
+</Steps>
+
+## Creating a Skill
+
+<Steps>
+  <Step title="Initialize the Skill">
+    Use the initialization script to create a template:
+    
+    ```bash
+    # From the DeerFlow root directory
+    python backend/scripts/init_skill.py my-skill --path skills/custom/
+    ```
+    
+    This creates:
+    ```
+    skills/custom/my-skill/
+    ├── SKILL.md
+    ├── scripts/
+    │   └── example.py
+    ├── references/
+    │   └── example.md
+    └── assets/
+        └── example.txt
+    ```
+  </Step>
+  
+  <Step title="Edit the Frontmatter">
+    Update `SKILL.md` with your skill's metadata:
+    
+    ```yaml
+    ---
+    name: data-analysis
+    description: Analyze datasets using pandas and create visualizations. Use when user asks to analyze CSV/Excel files, create charts, or perform statistical analysis.
+    ---
+    ```
+    
+    <Info>
+      Include all "when to use" information in the description - not in the body. The body is only loaded after triggering.
+    </Info>
+  </Step>
+  
+  <Step title="Write Instructions">
+    Add your skill instructions in the Markdown body:
+    
+    ```markdown
+    # Data Analysis Skill
+    
+    ## Overview
+    This skill provides tools and workflows for analyzing datasets.
+    
+    ## Prerequisites
+    - pandas library available in sandbox
+    - matplotlib for visualizations
+    
+    ## Quick Start
+    
+    Load and analyze a CSV:
+    ```python
+    import pandas as pd
+    df = pd.read_csv('/mnt/user-data/uploads/data.csv')
+    print(df.describe())
+    ```
+    
+    ## Creating Visualizations
+    ...
+    ```
+  </Step>
+  
+  <Step title="Add Bundled Resources (Optional)">
+    Add scripts, references, or assets as needed in the skill directory.
+    
+    **Scripts**: Executable code for deterministic tasks (e.g., `scripts/analyze.py`)
+    
+    **References**: Documentation loaded on-demand (e.g., `references/sql_schema.md`)
+    
+    **Assets**: Templates and files used in output (e.g., `assets/report-template.html`)
+    
+    <Info>
+      Bundled resources are loaded on-demand when explicitly referenced in SKILL.md.
+    </Info>
+  </Step>
+  
+  <Step title="Test the Skill">
+    Test your skill by placing it in the skills directory and using it:
+    
+    ```bash
+    # Skills are automatically discovered from:
+    # - skills/public/ (built-in skills)
+    # - skills/custom/ (user-created skills)
+    ```
+    
+    Ask DeerFlow a question that should trigger your skill:
+    - "Analyze this dataset for me"
+    - "Can you help with data analysis?"
+  </Step>
+</Steps>
+
+## Best Practices
+
+### Keep Skills Concise
+
+<Accordion title="Why conciseness matters">
+  Skills share the context window with everything else. Only include information the agent doesn't already know.
+  
+  ✅ **Good**: Concise examples and specific procedures
+  ❌ **Bad**: Verbose explanations of basic concepts
+</Accordion>
+
+### Progressive Disclosure
+
+Keep `SKILL.md` under 500 lines. Split content into separate files:
+
+Keep your main SKILL.md file concise and reference detailed documentation:
+
+```markdown
+# BigQuery Skill
+
+## Quick Start
+Basic query example...
+
+## Advanced Features
+- Finance queries: See references/finance.md
+- Sales queries: See references/sales.md  
+- Product queries: See references/product.md
+```
+
+The agent loads specific reference files only when they're needed.
+
+The agent loads specific reference files only when needed.
+
+### Write Effective Descriptions
+
+The description determines when your skill is used:
+
+<Tabs>
+  <Tab title="Good Descriptions">
+    ```yaml
+    ---
+    name: docx-editor
+    description: Comprehensive document creation, editing, and analysis with support for tracked changes, comments, formatting preservation, and text extraction. Use when working with professional documents (.docx files) for: (1) Creating new documents, (2) Modifying content, (3) Working with tracked changes, (4) Adding comments, or any other document tasks.
+    ---
+    ```
+    
+    ✅ Includes what it does
+    ✅ Lists specific triggers
+    ✅ Covers multiple use cases
+  </Tab>
+  
+  <Tab title="Bad Descriptions">
+    ```yaml
+    ---
+    name: docx-editor
+    description: Handle Word documents
+    ---
+    ```
+    
+    ❌ Too vague
+    ❌ Missing triggers
+    ❌ Doesn't explain capabilities
+  </Tab>
+</Tabs>
+
+### Avoid Unnecessary Files
+
+Do NOT create:
+- README.md
+- INSTALLATION_GUIDE.md
+- CHANGELOG.md
+- CONTRIBUTING.md
+
+<Warning>
+  Skills should only contain information needed for the AI agent to do the job. No auxiliary documentation or setup procedures.
+</Warning>
+
+## Real-World Examples
+
+Learn from existing skills in the DeerFlow repository:
+
+<CardGroup cols={2}>
+  <Card title="Deep Research" icon="magnifying-glass">
+    `skills/public/deep-research/SKILL.md`
+    
+    Systematic web research methodology
+  </Card>
+  
+  <Card title="Skill Creator" icon="wand-magic-sparkles">
+    `skills/public/skill-creator/SKILL.md`
+    
+    Meta-skill for creating new skills
+  </Card>
+  
+  <Card title="PPT Generation" icon="presentation">
+    `skills/public/ppt-generation/SKILL.md`
+    
+    Create PowerPoint presentations
+  </Card>
+  
+  <Card title="Frontend Design" icon="palette">
+    `skills/public/frontend-design/SKILL.md`
+    
+    Build web applications and UIs
+  </Card>
+</CardGroup>
+
+## Packaging Skills
+
+Once your skill is complete, package it for distribution:
+
+```bash
+# Package skill into .skill file
+python backend/scripts/package_skill.py skills/custom/my-skill
+
+# Specify output directory
+python backend/scripts/package_skill.py skills/custom/my-skill ./dist
+```
+
+This:
+1. Validates the skill structure
+2. Checks frontmatter and naming conventions
+3. Creates a `.skill` file (zip with .skill extension)
+
+<Info>
+  The packaging script automatically validates your skill. Fix any errors before the package is created.
+</Info>
+
+## Installing Custom Skills
+
+Place custom skills in the `skills/custom/` directory:
+
+```bash
+# Extract .skill file
+unzip my-skill.skill -d skills/custom/my-skill
+
+# Or copy skill directory directly
+cp -r /path/to/my-skill skills/custom/
+```
+
+Skills are automatically discovered on startup.
+
+## Managing Skills via API
+
+Enable/disable skills dynamically:
+
+<CodeGroup>
+```bash List Skills
+curl http://localhost:2026/api/skills
+```
+
+```bash Enable Skill
+curl -X PUT http://localhost:2026/api/skills/my-skill \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": true}'
+```
+
+```bash Disable Skill
+curl -X PUT http://localhost:2026/api/skills/my-skill \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": false}'
+```
+</CodeGroup>
+
+Skill state is stored in `extensions_config.json`.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Skill not triggering">
+    Check the description in frontmatter:
+    - Is it specific enough?
+    - Does it include trigger keywords?
+    - Does it match the user's query?
+    
+    Test by explicitly asking for the skill:
+    - "Use the [skill-name] skill to..."
+  </Accordion>
+  
+  <Accordion title="Scripts not executing">
+    Verify:
+    - Script has correct shebang (`#!/usr/bin/env python3`)
+    - File has execute permissions: `chmod +x scripts/script.py`
+    - Script path is correct in SKILL.md
+    - Script is using sandbox virtual paths (`/mnt/skills/...`)
+  </Accordion>
+  
+  <Accordion title="References not loading">
+    Ensure:
+    - Reference files exist in `references/` directory
+    - Links in SKILL.md use relative paths
+    - File names match exactly (case-sensitive)
+  </Accordion>
+  
+  <Accordion title="Validation fails">
+    Check packaging script output:
+    ```bash
+    python backend/scripts/package_skill.py skills/custom/my-skill
+    ```
+    
+    Common issues:
+    - Missing required frontmatter fields
+    - Invalid YAML syntax
+    - Incorrect directory structure
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Custom Tools" icon="wrench" href="/guides/custom-tools">
+    Add custom tools to complement your skills
+  </Card>
+  
+  <Card title="MCP Servers" icon="plug" href="/guides/mcp-servers">
+    Integrate external tools via MCP protocol
+  </Card>
+  
+  <Card title="Configuration" icon="gear" href="/configuration/skills">
+    Learn about skill configuration options
+  </Card>
+  
+  <Card title="Examples" icon="book" href="https://github.com/bytedance/deer-flow/tree/main/skills/public">
+    Browse built-in skills for inspiration
+  </Card>
+</CardGroup>

@@ -1,0 +1,548 @@
+---
+title: Environment Variables
+description: Complete reference of environment variables used by DeerFlow for configuration and runtime behavior
+---
+
+DeerFlow uses environment variables for configuration paths, API keys, and runtime settings. This page documents all supported environment variables.
+
+## Configuration Paths
+
+These variables control where DeerFlow looks for configuration files and data storage.
+
+### DEER_FLOW_CONFIG_PATH
+
+<ParamField path="DEER_FLOW_CONFIG_PATH" type="string">
+  Path to the main configuration file (`config.yaml`).
+  
+  **Default Resolution** (if not set):
+  1. Current working directory: `./config.yaml`
+  2. Parent directory: `../config.yaml`
+  3. Error if not found
+</ParamField>
+
+```bash
+# Use custom config location
+export DEER_FLOW_CONFIG_PATH=/etc/deerflow/config.yaml
+
+# Or relative path
+export DEER_FLOW_CONFIG_PATH=./configs/production.yaml
+```
+
+### DEER_FLOW_EXTENSIONS_CONFIG_PATH
+
+<ParamField path="DEER_FLOW_EXTENSIONS_CONFIG_PATH" type="string">
+  Path to the extensions configuration file (`extensions_config.json`).
+  
+  **Default Resolution** (if not set):
+  1. Current working directory: `./extensions_config.json`
+  2. Parent directory: `../extensions_config.json`
+  3. Backward compatibility: `./mcp_config.json`
+  4. Empty config if not found (extensions are optional)
+</ParamField>
+
+```bash
+# Use custom extensions config
+export DEER_FLOW_EXTENSIONS_CONFIG_PATH=/etc/deerflow/extensions.json
+```
+
+### DEER_FLOW_HOME
+
+<ParamField path="DEER_FLOW_HOME" type="string">
+  Base directory for DeerFlow's data storage (memory, threads, agent configs).
+  
+  **Default Resolution** (if not set):
+  1. If running from `backend/` directory: `./.deer-flow`
+  2. Otherwise: `~/.deer-flow`
+  
+  **Directory Structure:**
+  ```
+  {DEER_FLOW_HOME}/
+  ├── memory.json
+  ├── USER.md
+  ├── agents/
+  └── threads/
+  ```
+</ParamField>
+
+```bash
+# Use custom data directory
+export DEER_FLOW_HOME=/var/lib/deerflow
+
+# Or relative to project
+export DEER_FLOW_HOME=./data
+```
+
+## API Keys and Credentials
+
+These variables are referenced in configuration files using the `$VARIABLE_NAME` syntax.
+
+### Model Provider API Keys
+
+<CardGroup cols={2}>
+  <Card title="OpenAI" icon="openai">
+    ```bash
+    export OPENAI_API_KEY="sk-proj-..."
+    ```
+  </Card>
+  <Card title="Anthropic" icon="robot">
+    ```bash
+    export ANTHROPIC_API_KEY="sk-ant-..."
+    ```
+  </Card>
+  <Card title="Google" icon="google">
+    ```bash
+    export GOOGLE_API_KEY="AIza..."
+    ```
+  </Card>
+  <Card title="DeepSeek" icon="brain">
+    ```bash
+    export DEEPSEEK_API_KEY="sk-..."
+    ```
+  </Card>
+</CardGroup>
+
+```bash
+# Additional providers
+export NOVITA_API_KEY="your-novita-key"
+export VOLCENGINE_API_KEY="your-volcengine-key"
+export MOONSHOT_API_KEY="your-moonshot-key"
+```
+
+Used in `config.yaml`:
+
+```yaml config.yaml
+models:
+  - name: gpt-4
+    api_key: $OPENAI_API_KEY  # Resolved from environment
+  - name: claude-3-5-sonnet
+    api_key: $ANTHROPIC_API_KEY
+```
+
+<Warning>
+  Never hardcode API keys in configuration files. Always use environment variables.
+</Warning>
+
+### Tool and Service API Keys
+
+```bash
+# Web search (Tavily)
+export TAVILY_API_KEY="tvly-..."
+
+# GitHub integration
+export GITHUB_TOKEN="ghp_..."
+
+# Brave search
+export BRAVE_API_KEY="BSA..."
+
+# Custom integrations
+export MY_API_KEY="your-custom-key"
+export DATABASE_URL="postgresql://..."
+```
+
+Used in `config.yaml` and `extensions_config.json`:
+
+```yaml config.yaml
+tools:
+  - name: web_search
+    api_key: $TAVILY_API_KEY
+```
+
+```json extensions_config.json
+{
+  "mcpServers": {
+    "github": {
+      "env": {
+        "GITHUB_TOKEN": "$GITHUB_TOKEN"
+      }
+    }
+  }
+}
+```
+
+## Runtime Configuration
+
+These variables affect DeerFlow's runtime behavior.
+
+### Python Environment
+
+<ParamField path="PYTHONPATH" type="string">
+  Python module search path. May be needed if running DeerFlow from a non-standard location.
+</ParamField>
+
+```bash
+export PYTHONPATH="/path/to/deerflow/backend:$PYTHONPATH"
+```
+
+### Development Mode
+
+<ParamField path="DEBUG" type="string">
+  Enable debug mode for more verbose logging.
+  
+  Values: `"true"`, `"1"`, `"yes"` → Enable debug
+</ParamField>
+
+```bash
+export DEBUG="true"
+```
+
+### Database and Storage
+
+For custom database connections:
+
+```bash
+# PostgreSQL
+export DATABASE_URL="postgresql://user:pass@localhost:5432/deerflow"
+
+# Redis
+export REDIS_URL="redis://localhost:6379/0"
+
+# Custom storage backend
+export STORAGE_BACKEND="s3"
+export AWS_ACCESS_KEY_ID="your-key"
+export AWS_SECRET_ACCESS_KEY="your-secret"
+export S3_BUCKET="deerflow-data"
+```
+
+## Sandbox-Specific Variables
+
+These variables are injected into sandbox environments.
+
+### Container Environment Variables
+
+Configured in `config.yaml` and resolved from host environment:
+
+```yaml config.yaml
+sandbox:
+  use: src.community.aio_sandbox:AioSandboxProvider
+  environment:
+    # Static values
+    NODE_ENV: production
+    
+    # Resolved from host environment
+    OPENAI_API_KEY: $OPENAI_API_KEY
+    DATABASE_URL: $DATABASE_URL
+    API_KEY: $MY_API_KEY
+```
+
+Host environment:
+```bash
+export OPENAI_API_KEY="sk-..."
+export DATABASE_URL="postgresql://..."
+export MY_API_KEY="key_..."
+```
+
+<Info>
+  Variables prefixed with `$` in sandbox configuration are resolved from the **host** environment when DeerFlow starts.
+</Info>
+
+## MCP Server Variables
+
+Environment variables for MCP servers (stdio transport):
+
+```json extensions_config.json
+{
+  "mcpServers": {
+    "github": {
+      "type": "stdio",
+      "env": {
+        "GITHUB_TOKEN": "$GITHUB_TOKEN",
+        "GITHUB_OWNER": "$GITHUB_OWNER"
+      }
+    },
+    "postgres": {
+      "type": "stdio",
+      "env": {
+        "DATABASE_URL": "$DATABASE_URL"
+      }
+    }
+  }
+}
+```
+
+Host environment:
+```bash
+export GITHUB_TOKEN="ghp_..."
+export GITHUB_OWNER="my-org"
+export DATABASE_URL="postgresql://localhost/mydb"
+```
+
+## OAuth Variables
+
+For MCP servers using OAuth authentication:
+
+```bash
+# OAuth client credentials
+export MCP_OAUTH_CLIENT_ID="client_..."
+export MCP_OAUTH_CLIENT_SECRET="secret_..."
+export MCP_REFRESH_TOKEN="refresh_..."
+```
+
+Used in `extensions_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "my-api": {
+      "type": "http",
+      "oauth": {
+        "enabled": true,
+        "client_id": "$MCP_OAUTH_CLIENT_ID",
+        "client_secret": "$MCP_OAUTH_CLIENT_SECRET",
+        "refresh_token": "$MCP_REFRESH_TOKEN"
+      }
+    }
+  }
+}
+```
+
+## Setting Environment Variables
+
+### Using .env Files (Recommended)
+
+Create a `.env` file in your project root:
+
+```bash .env
+# Configuration paths
+DEER_FLOW_CONFIG_PATH=./config.yaml
+DEER_FLOW_HOME=./data
+
+# API keys
+OPENAI_API_KEY=sk-proj-...
+ANTHROPIC_API_KEY=sk-ant-...
+GOOGLE_API_KEY=AIza...
+
+# Tools
+TAVILY_API_KEY=tvly-...
+GITHUB_TOKEN=ghp_...
+
+# Custom
+MY_API_KEY=key_...
+DATABASE_URL=postgresql://localhost/db
+```
+
+DeerFlow automatically loads `.env` files using `python-dotenv`.
+
+<Warning>
+  Add `.env` to your `.gitignore` to avoid committing secrets:
+  
+  ```gitignore .gitignore
+  .env
+  .env.*
+  !.env.example
+  ```
+</Warning>
+
+### Using Shell Export
+
+```bash
+# Export in current shell
+export OPENAI_API_KEY="sk-proj-..."
+export DEER_FLOW_HOME="/var/lib/deerflow"
+
+# Add to shell profile for persistence
+echo 'export OPENAI_API_KEY="sk-proj-..."' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### Using System Environment (Linux)
+
+```bash
+# Create systemd environment file
+sudo nano /etc/systemd/system/deerflow.service.d/override.conf
+```
+
+```ini override.conf
+[Service]
+Environment="OPENAI_API_KEY=sk-proj-..."
+Environment="DEER_FLOW_HOME=/var/lib/deerflow"
+```
+
+### Using Docker
+
+```yaml docker-compose.yml
+services:
+  deerflow:
+    image: deerflow:latest
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DEER_FLOW_HOME=/app/data
+      - DEER_FLOW_CONFIG_PATH=/app/config/config.yaml
+    env_file:
+      - .env
+```
+
+### Using Kubernetes
+
+```yaml deployment.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: deerflow-secrets
+type: Opaque
+stringData:
+  openai-api-key: sk-proj-...
+  anthropic-api-key: sk-ant-...
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deerflow
+spec:
+  template:
+    spec:
+      containers:
+      - name: deerflow
+        env:
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: deerflow-secrets
+              key: openai-api-key
+        - name: DEER_FLOW_HOME
+          value: /var/lib/deerflow
+```
+
+## Environment Variable Reference Table
+
+| Variable | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `DEER_FLOW_CONFIG_PATH` | Path | No | `./config.yaml` | Main config file location |
+| `DEER_FLOW_EXTENSIONS_CONFIG_PATH` | Path | No | `./extensions_config.json` | Extensions config location |
+| `DEER_FLOW_HOME` | Path | No | `~/.deer-flow` | Data storage directory |
+| `OPENAI_API_KEY` | String | No* | - | OpenAI API key |
+| `ANTHROPIC_API_KEY` | String | No* | - | Anthropic API key |
+| `GOOGLE_API_KEY` | String | No* | - | Google API key |
+| `DEEPSEEK_API_KEY` | String | No* | - | DeepSeek API key |
+| `TAVILY_API_KEY` | String | No* | - | Tavily search API key |
+| `GITHUB_TOKEN` | String | No* | - | GitHub access token |
+| `DEBUG` | Boolean | No | `false` | Enable debug logging |
+| `PYTHONPATH` | Path | No | - | Python module search path |
+
+<Info>
+  * Required if the corresponding service/model is configured in `config.yaml` or `extensions_config.json`.
+</Info>
+
+## Validation and Errors
+
+### Missing Required Variables
+
+If a configuration references an undefined environment variable:
+
+```yaml config.yaml
+models:
+  - name: gpt-4
+    api_key: $OPENAI_API_KEY  # But OPENAI_API_KEY is not set
+```
+
+DeerFlow will raise an error:
+
+```
+ValueError: Environment variable OPENAI_API_KEY not found for config value $OPENAI_API_KEY
+```
+
+**Solution**: Set the variable before starting DeerFlow:
+
+```bash
+export OPENAI_API_KEY="sk-proj-..."
+```
+
+### Security Best Practices
+
+<AccordionGroup>
+  <Accordion title="Never Commit Secrets" icon="lock">
+    Always use `.gitignore` to prevent committing sensitive files:
+    
+    ```gitignore
+    .env
+    .env.local
+    .env.*.local
+    *.key
+    *.pem
+    secrets/
+    ```
+  </Accordion>
+  
+  <Accordion title="Use Secret Management" icon="key">
+    For production, use proper secret management:
+    - AWS Secrets Manager
+    - HashiCorp Vault
+    - Kubernetes Secrets
+    - Azure Key Vault
+  </Accordion>
+  
+  <Accordion title="Rotate Keys Regularly" icon="rotate">
+    Rotate API keys and secrets periodically:
+    
+    ```bash
+    # Generate new key from provider
+    # Update environment variable
+    export OPENAI_API_KEY="sk-proj-NEW_KEY"
+    
+    # Reload DeerFlow config
+    # (or restart service)
+    ```
+  </Accordion>
+  
+  <Accordion title="Limit Variable Scope" icon="shield">
+    Only set variables where needed:
+    - Development: `.env` file
+    - Production: System/container environment
+    - CI/CD: Pipeline secrets
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Environment variable not resolved" icon="triangle-exclamation">
+    Check the variable is set:
+    
+    ```bash
+    # Check if variable exists
+    echo $OPENAI_API_KEY
+    
+    # List all environment variables
+    env | grep DEER_FLOW
+    env | grep API_KEY
+    ```
+  </Accordion>
+  
+  <Accordion title=".env file not loaded" icon="triangle-exclamation">
+    Ensure `.env` is in the correct location:
+    
+    ```bash
+    # Should be in the directory where you run DeerFlow
+    ls -la .env
+    
+    # Or in the parent directory
+    ls -la ../.env
+    ```
+    
+    DeerFlow uses `python-dotenv` which loads `.env` from the current directory.
+  </Accordion>
+  
+  <Accordion title="Docker container can't access host variables" icon="triangle-exclamation">
+    Pass variables explicitly in `docker-compose.yml`:
+    
+    ```yaml
+    services:
+      deerflow:
+        environment:
+          - OPENAI_API_KEY=${OPENAI_API_KEY}
+        # Or use env_file
+        env_file:
+          - .env
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration Overview" icon="gear" href="/configuration/overview">
+    Return to configuration overview
+  </Card>
+  <Card title="Deployment Guide" icon="rocket" href="/guides/deployment">
+    Deploy DeerFlow to production
+  </Card>
+</CardGroup>

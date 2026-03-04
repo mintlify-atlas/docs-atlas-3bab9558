@@ -1,0 +1,538 @@
+---
+title: Docker Deployment
+description: Deploy DeerFlow using Docker and Docker Compose with production-ready configuration
+---
+
+Deploy DeerFlow using Docker for a consistent, isolated environment. Docker deployment is the recommended approach for both development and production.
+
+## Architecture
+
+DeerFlow's Docker deployment consists of four main services:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│              Nginx Reverse Proxy (Port 2026)            │
+└────────────────────┬────────────────────────────────────┘
+                     │
+      ┌──────────────┼──────────────┐
+      │              │              │
+      ▼              ▼              ▼
+┌──────────┐  ┌──────────┐  ┌──────────────┐
+│ Frontend │  │ Gateway  │  │  LangGraph   │
+│  :3000   │  │  :8001   │  │    :2024     │
+└──────────┘  └──────────┘  └──────────────┘
+                     │
+                     ▼
+              ┌──────────────┐
+              │  Provisioner │  (Optional)
+              │    :8002     │
+              └──────────────┘
+```
+
+## Prerequisites
+
+- Docker 20.10+ or Docker Desktop
+- Docker Compose v2.0+
+- 4GB RAM minimum (8GB recommended)
+- 10GB disk space
+
+## Quick Start
+
+### 1. Clone and Configure
+
+```bash
+git clone https://github.com/bytedance/deer-flow.git
+cd deer-flow
+
+# Generate configuration files
+make config
+```
+
+### 2. Configure Your Model
+
+Edit `config.yaml` to add at least one LLM model:
+
+```yaml
+models:
+  - name: gpt-4
+    display_name: GPT-4
+    use: langchain_openai:ChatOpenAI
+    model: gpt-4
+    api_key: $OPENAI_API_KEY
+    max_tokens: 4096
+    temperature: 0.7
+```
+
+### 3. Set API Keys
+
+Edit `.env` file in the project root:
+
+```bash
+OPENAI_API_KEY=your-openai-api-key
+TAVILY_API_KEY=your-tavily-api-key
+JINA_API_KEY=your-jina-api-key
+```
+
+### 4. Initialize and Start
+
+```bash
+# Pre-pull sandbox image (recommended, ~500MB)
+make docker-init
+
+# Start all services
+make docker-start
+```
+
+### 5. Access the Application
+
+Open your browser to:
+- **Application**: http://localhost:2026
+- **API Gateway**: http://localhost:2026/api/
+- **LangGraph**: http://localhost:2026/api/langgraph/
+- **API Docs**: http://localhost:2026/docs
+
+## Docker Compose Services
+
+### Frontend Service
+
+```yaml
+frontend:
+  build:
+    context: ../
+    dockerfile: frontend/Dockerfile
+  ports:
+    - "3000:3000"
+  volumes:
+    - ../frontend/src:/app/frontend/src
+    - ../frontend/public:/app/frontend/public
+  environment:
+    - NODE_ENV=development
+```
+
+**Key Features:**
+- Next.js 14 with App Router
+- Hot reload for development
+- pnpm package manager
+- Node.js 22-alpine base image
+
+### Gateway Service
+
+```yaml
+gateway:
+  build:
+    context: ../
+    dockerfile: backend/Dockerfile
+  ports:
+    - "8001:8001"
+  volumes:
+    - ../backend/src:/app/backend/src
+    - ../config.yaml:/app/config.yaml
+    - ../skills:/app/skills
+  command: >
+    sh -c "cd backend && 
+    uv run uvicorn src.gateway.app:app 
+    --host 0.0.0.0 --port 8001 --reload"
+```
+
+**Provides:**
+- Models API (`/api/models`)
+- MCP configuration (`/api/mcp`)
+- Skills management (`/api/skills`)
+- File uploads (`/api/threads/{id}/uploads`)
+- Artifact serving (`/api/threads/{id}/artifacts`)
+
+### LangGraph Service
+
+```yaml
+langgraph:
+  build:
+    context: ../
+    dockerfile: backend/Dockerfile
+  ports:
+    - "2024:2024"
+  volumes:
+    - ../backend/src:/app/backend/src
+    - ../backend/.deer-flow:/app/backend/.deer-flow
+  command: >
+    sh -c "cd backend && 
+    uv run langgraph dev 
+    --host 0.0.0.0 --port 2024 --allow-blocking"
+```
+
+**Handles:**
+- Agent runtime execution
+- Thread state management
+- SSE streaming responses
+- Checkpoint persistence
+- Tool execution
+
+### Nginx Service
+
+```yaml
+nginx:
+  image: nginx:alpine
+  ports:
+    - "2026:2026"
+  volumes:
+    - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+  depends_on:
+    - frontend
+    - gateway
+    - langgraph
+```
+
+**Routes:**
+- `/api/langgraph/*` → LangGraph server (2024)
+- `/api/*` → Gateway API (8001)
+- `/*` → Frontend (3000)
+
+## Volume Mounts
+
+### Development Volumes
+
+For hot reload and development:
+
+```yaml
+volumes:
+  # Frontend hot reload
+  - ../frontend/src:/app/frontend/src
+  - ../frontend/public:/app/frontend/public
+  
+  # Backend hot reload
+  - ../backend/src:/app/backend/src
+  
+  # Configuration
+  - ../config.yaml:/app/config.yaml
+  - ../.env:/app/.env
+  
+  # Skills directory
+  - ../skills:/app/skills
+  
+  # Thread data persistence
+  - ../backend/.deer-flow:/app/backend/.deer-flow
+  
+  # Logs
+  - ../logs:/app/logs
+```
+
+### Cache Volumes
+
+For faster builds:
+
+```yaml
+volumes:
+  # pnpm package cache
+  - ~/.local/share/pnpm/store:/root/.local/share/pnpm/store
+  
+  # uv Python cache
+  - ~/.cache/uv:/root/.cache/uv
+```
+
+## Network Configuration
+
+DeerFlow uses a custom bridge network:
+
+```yaml
+networks:
+  deer-flow-dev:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.200.0/24
+```
+
+**Benefits:**
+- Service discovery via DNS
+- Internal service communication
+- Isolation from other containers
+- Predictable IP addressing
+
+## Environment Variables
+
+### Required Variables
+
+```bash
+# Model API Keys
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+DEEPSEEK_API_KEY=sk-...
+
+# Tool API Keys
+TAVILY_API_KEY=tvly-...
+JINA_API_KEY=jina_...
+```
+
+### Optional Variables
+
+```bash
+# Custom config path
+DEER_FLOW_CONFIG_PATH=/custom/path/config.yaml
+
+# pnpm store location
+PNPM_STORE_PATH=/root/.local/share/pnpm/store
+
+# Node environment
+NODE_ENV=production
+
+# Enable CI mode (disable interactive prompts)
+CI=true
+```
+
+## Building Images
+
+### Backend Image
+
+From `backend/Dockerfile`:
+
+```dockerfile
+FROM python:3.12-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv package manager
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+WORKDIR /app
+
+# Copy and install dependencies
+COPY backend ./backend
+RUN --mount=type=cache,target=/root/.cache/uv \
+    sh -c "cd backend && uv sync"
+
+EXPOSE 8001 2024
+
+CMD ["sh", "-c", "uv run uvicorn src.gateway.app:app --host 0.0.0.0 --port 8001"]
+```
+
+**Build command:**
+
+```bash
+docker build -t deer-flow-backend -f backend/Dockerfile .
+```
+
+### Frontend Image
+
+From `frontend/Dockerfile`:
+
+```dockerfile
+FROM node:22-alpine
+
+# Install pnpm
+RUN corepack enable && corepack install -g pnpm@10.26.2
+
+WORKDIR /app
+
+# Copy and install dependencies
+COPY frontend ./frontend
+RUN sh -c "cd /app/frontend && pnpm install --frozen-lockfile"
+
+EXPOSE 3000
+```
+
+**Build command:**
+
+```bash
+docker build -t deer-flow-frontend -f frontend/Dockerfile .
+```
+
+## Management Commands
+
+### Start Services
+
+```bash
+# Start all services
+make docker-start
+
+# Start with rebuild
+make docker-start --build
+
+# Start specific service
+docker compose -f docker/docker-compose-dev.yaml up frontend
+```
+
+### Stop Services
+
+```bash
+# Stop all services
+make docker-stop
+
+# Stop and remove volumes
+docker compose -f docker/docker-compose-dev.yaml down -v
+```
+
+### View Logs
+
+```bash
+# All services
+make docker-logs
+
+# Specific services
+make docker-logs-frontend
+make docker-logs-gateway
+
+# Follow logs
+docker compose -f docker/docker-compose-dev.yaml logs -f langgraph
+```
+
+### Restart Services
+
+```bash
+# Restart all
+docker compose -f docker/docker-compose-dev.yaml restart
+
+# Restart specific service
+docker compose -f docker/docker-compose-dev.yaml restart gateway
+```
+
+## Production Optimizations
+
+### Multi-stage Build
+
+For smaller production images:
+
+```dockerfile
+# Build stage
+FROM node:22-alpine AS builder
+WORKDIR /app
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
+COPY frontend/ .
+RUN pnpm run build
+
+# Production stage
+FROM node:22-alpine
+WORKDIR /app
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/node_modules ./node_modules
+EXPOSE 3000
+CMD ["pnpm", "start"]
+```
+
+### Environment-specific Compose
+
+Create `docker-compose.prod.yaml`:
+
+```yaml
+services:
+  frontend:
+    build:
+      context: ../
+      dockerfile: frontend/Dockerfile.prod
+    environment:
+      - NODE_ENV=production
+    restart: always
+    
+  gateway:
+    build:
+      context: ../
+      dockerfile: backend/Dockerfile.prod
+    command: >
+      sh -c "cd backend && 
+      uv run uvicorn src.gateway.app:app 
+      --host 0.0.0.0 --port 8001 
+      --workers 4"
+    restart: always
+    
+  langgraph:
+    restart: always
+    command: >
+      sh -c "cd backend && 
+      uv run langgraph start 
+      --host 0.0.0.0 --port 2024"
+```
+
+### Health Checks
+
+Add health checks to services:
+
+```yaml
+gateway:
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 40s
+```
+
+## Troubleshooting
+
+### Services Not Starting
+
+**Check logs:**
+```bash
+make docker-logs
+```
+
+**Verify configuration:**
+```bash
+docker compose -f docker/docker-compose-dev.yaml config
+```
+
+### Port Conflicts
+
+**Check port usage:**
+```bash
+lsof -i :2026  # nginx
+lsof -i :3000  # frontend
+lsof -i :8001  # gateway
+lsof -i :2024  # langgraph
+```
+
+**Change ports in docker-compose.yaml:**
+```yaml
+ports:
+  - "8026:2026"  # Use 8026 on host instead
+```
+
+### Volume Permission Issues
+
+**Fix permissions:**
+```bash
+sudo chown -R $USER:$USER backend/.deer-flow
+sudo chown -R $USER:$USER logs
+```
+
+### Image Build Failures
+
+**Clear build cache:**
+```bash
+docker builder prune -a
+```
+
+**Rebuild without cache:**
+```bash
+docker compose -f docker/docker-compose-dev.yaml build --no-cache
+```
+
+### Network Issues
+
+**Recreate network:**
+```bash
+docker compose -f docker/docker-compose-dev.yaml down
+docker network rm deer-flow-dev
+make docker-start
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Kubernetes Deployment" icon="dharmachakra" href="/deployment/kubernetes">
+    Deploy DeerFlow on Kubernetes with pod-based sandboxes
+  </Card>
+  <Card title="Production Guide" icon="server" href="/deployment/production">
+    Production deployment best practices and optimization
+  </Card>
+</CardGroup>
+
+## See Also
+
+- [Configuration Guide](/configuration/overview) - Configure models, tools, and sandbox
+- [Sandbox Modes](/configuration/sandbox) - Choose the right sandbox mode
+- [Environment Variables](/configuration/environment) - Complete environment variable reference

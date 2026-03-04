@@ -1,0 +1,224 @@
+---
+title: Architecture
+description: DeerFlow system architecture and component overview
+---
+
+DeerFlow is built on a multi-service architecture that combines LangGraph for agent orchestration, FastAPI for REST APIs, and Next.js for the user interface.
+
+## System Overview
+
+The system consists of four main components:
+
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────────┐
+│   Frontend  │────▶│    Nginx     │◀────│   Gateway   │
+│  (Port 3000)│     │  (Port 2026) │     │  API (8001) │
+└─────────────┘     └──────┬───────┘     └─────────────┘
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │  LangGraph   │
+                    │ Server (2024)│
+                    └──────────────┘
+```
+
+<CardGroup cols={2}>
+  <Card title="LangGraph Server" icon="diagram-project" href="/api/langgraph/overview">
+    Agent runtime and workflow execution engine (port 2024)
+  </Card>
+  <Card title="Gateway API" icon="server" href="/api/gateway/overview">
+    REST API for configuration and management (port 8001)
+  </Card>
+  <Card title="Frontend" icon="window" href="#frontend">
+    Next.js web interface (port 3000)
+  </Card>
+  <Card title="Nginx" icon="network-wired" href="#nginx">
+    Unified reverse proxy entry point (port 2026)
+  </Card>
+</CardGroup>
+
+## LangGraph Server
+
+The LangGraph Server is the core of DeerFlow, running the agent graph and managing execution.
+
+**Port**: 2024
+
+**Responsibilities**:
+- Agent graph execution with middleware chain
+- Thread state management and checkpointing
+- Tool execution and sub-agent orchestration
+- Real-time streaming via Server-Sent Events (SSE)
+
+**Configuration**: `backend/langgraph.json`
+
+```json
+{
+  "graphs": {
+    "lead_agent": "./src/agents/lead_agent/agent.py:make_lead_agent"
+  },
+  "store": {
+    "class": "langgraph.store.memory:InMemoryStore"
+  }
+}
+```
+
+<Info>
+  The LangGraph Server uses the official LangGraph platform for agent orchestration.
+</Info>
+
+## Gateway API
+
+The Gateway API provides REST endpoints for configuration and system management.
+
+**Port**: 8001
+
+**Endpoints**:
+- `/api/models` - Model configuration
+- `/api/skills` - Skills management
+- `/api/mcp` - MCP server configuration
+- `/api/memory` - Memory system access
+- `/api/threads/{id}/uploads` - File uploads
+- `/api/threads/{id}/artifacts` - Artifact serving
+- `/health` - Health check
+
+**Technology**: FastAPI with Pydantic validation
+
+<Card title="Gateway API Reference" icon="code" href="/api/gateway/overview">
+  View complete API documentation
+</Card>
+
+## Frontend
+
+The frontend is a Next.js application providing the chat interface and system configuration UI.
+
+**Port**: 3000 (accessed via Nginx on 2026)
+
+**Key Features**:
+- Real-time chat with streaming responses
+- Thread management and history
+- File upload interface
+- Model and skill configuration
+- Artifact preview and download
+
+**Technology Stack**:
+- Next.js 16 with App Router
+- React 19
+- TanStack Query for state management
+- Tailwind CSS for styling
+
+## Nginx Reverse Proxy
+
+Nginx acts as the unified entry point, routing requests to the appropriate backend services.
+
+**Port**: 2026 (default entry point)
+
+**Routing**:
+- `/api/langgraph/*` → LangGraph Server (2024)
+- `/api/*` → Gateway API (8001)
+- `/*` → Frontend (3000)
+
+**Benefits**:
+- Single port access for all services
+- SSL/TLS termination
+- Load balancing capabilities
+- Static asset serving
+
+## Data Flow
+
+### Chat Message Flow
+
+1. User sends message via Frontend
+2. Frontend calls LangGraph Server via Nginx
+3. LangGraph Server processes message through middleware chain
+4. Agent executes with tools and sub-agents
+5. Streaming response sent back via SSE
+6. Frontend renders response in real-time
+
+### Configuration Flow
+
+1. User updates configuration via Frontend
+2. Frontend calls Gateway API via Nginx
+3. Gateway updates `config.yaml` or `extensions_config.json`
+4. LangGraph Server detects changes via file mtime
+5. Configuration reloaded on next request
+
+## Thread Isolation
+
+Each conversation thread operates in isolation:
+
+- **State**: Separate ThreadState per thread
+- **Filesystem**: Thread-specific directories in sandbox
+- **Memory**: Thread context stored in checkpoints
+- **Uploads**: Files isolated to thread directory
+
+**Physical Structure**:
+```
+backend/.deer-flow/threads/
+├── thread-abc123/
+│   └── user-data/
+│       ├── workspace/     # Agent working directory
+│       ├── uploads/       # User uploaded files
+│       └── outputs/       # Agent output files
+└── thread-xyz789/
+    └── user-data/
+        ├── workspace/
+        ├── uploads/
+        └── outputs/
+```
+
+## Deployment Modes
+
+DeerFlow supports multiple deployment configurations:
+
+<Tabs>
+  <Tab title="Local Development">
+    All services run directly on the host machine:
+    
+    ```bash
+    make dev
+    ```
+    
+    - LangGraph Server: `localhost:2024`
+    - Gateway API: `localhost:8001`
+    - Frontend: `localhost:3000`
+    - Nginx: `localhost:2026`
+  </Tab>
+  
+  <Tab title="Docker Development">
+    Services run in Docker containers:
+    
+    ```bash
+    make docker-start
+    ```
+    
+    - All services accessible via Nginx on `localhost:2026`
+    - Volumes mounted for hot-reload
+    - Sandbox runs in isolated containers
+  </Tab>
+  
+  <Tab title="Production">
+    Kubernetes deployment with scaling:
+    
+    - Horizontal pod autoscaling
+    - Persistent storage for threads and memory
+    - Load balancer for ingress
+    - Provisioner for sandbox pod management
+  </Tab>
+</Tabs>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Agent System" icon="robot" href="/concepts/agent-system">
+    Learn about the lead agent and middleware chain
+  </Card>
+  <Card title="Sandbox" icon="box" href="/concepts/sandbox">
+    Understand sandbox execution and isolation
+  </Card>
+  <Card title="Skills" icon="puzzle-piece" href="/concepts/skills">
+    Explore the skills system
+  </Card>
+  <Card title="Deployment" icon="rocket" href="/deployment/docker">
+    Deploy DeerFlow to production
+  </Card>
+</CardGroup>

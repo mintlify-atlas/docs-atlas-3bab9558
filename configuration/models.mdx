@@ -1,0 +1,400 @@
+---
+title: Models Configuration
+description: Configure LLM models, providers, API keys, and advanced features like thinking and vision support
+---
+
+DeerFlow supports multiple LLM providers through a flexible model configuration system. You can configure multiple models and switch between them based on your needs.
+
+## Configuration Structure
+
+Models are configured in the `models` section of `config.yaml`:
+
+```yaml config.yaml
+models:
+  - name: gpt-4                          # Unique identifier
+    display_name: GPT-4                  # Human-readable name
+    use: langchain_openai:ChatOpenAI     # Provider class path
+    model: gpt-4                         # Model name for the provider
+    api_key: $OPENAI_API_KEY            # API key (use env vars)
+    max_tokens: 4096                     # Maximum tokens
+    temperature: 0.7                     # Sampling temperature
+    supports_vision: true                # Enable vision/image support
+```
+
+## Required Fields
+
+<ParamField path="name" type="string" required>
+  Unique identifier for the model. Used in API calls and UI selection.
+</ParamField>
+
+<ParamField path="use" type="string" required>
+  Import path to the LangChain chat model class. Format: `module.path:ClassName`
+  
+  Examples:
+  - `langchain_openai:ChatOpenAI`
+  - `langchain_anthropic:ChatAnthropic`
+  - `langchain_google_genai:ChatGoogleGenerativeAI`
+  - `src.models.patched_deepseek:PatchedChatDeepSeek`
+</ParamField>
+
+<ParamField path="model" type="string" required>
+  The model identifier expected by the provider (e.g., `gpt-4`, `claude-3-5-sonnet-20241022`)
+</ParamField>
+
+## Optional Fields
+
+<ParamField path="display_name" type="string">
+  Human-readable name shown in the UI. Defaults to the `name` field if not specified.
+</ParamField>
+
+<ParamField path="description" type="string">
+  Optional description of the model's capabilities or use case.
+</ParamField>
+
+<ParamField path="api_key" type="string">
+  API key for the provider. **Always use environment variables** (e.g., `$OPENAI_API_KEY`) to avoid committing secrets.
+</ParamField>
+
+<ParamField path="max_tokens" type="integer">
+  Maximum number of tokens to generate in responses.
+</ParamField>
+
+<ParamField path="temperature" type="float">
+  Sampling temperature (0.0 to 2.0). Lower values are more deterministic, higher values more creative.
+</ParamField>
+
+<ParamField path="base_url" type="string">
+  Custom API endpoint URL. Required for OpenAI-compatible providers.
+  
+  Example: `https://api.novita.ai/openai`
+</ParamField>
+
+<ParamField path="api_base" type="string">
+  Alternative field name for base URL (used by some providers like DeepSeek).
+</ParamField>
+
+## Advanced Features
+
+### Vision Support
+
+<ParamField path="supports_vision" type="boolean" default="false">
+  Enable the model to process images. When enabled, the agent can use tools like `view_image`.
+</ParamField>
+
+```yaml
+models:
+  - name: gpt-4-vision
+    display_name: GPT-4 Vision
+    use: langchain_openai:ChatOpenAI
+    model: gpt-4-vision-preview
+    api_key: $OPENAI_API_KEY
+    supports_vision: true  # Enables image processing
+```
+
+### Thinking/Reasoning Support
+
+<ParamField path="supports_thinking" type="boolean" default="false">
+  Enable extended reasoning mode (for models like DeepSeek-R1, o1).
+</ParamField>
+
+<ParamField path="when_thinking_enabled" type="object">
+  Additional parameters passed to the model when thinking mode is enabled.
+</ParamField>
+
+```yaml
+models:
+  - name: deepseek-v3
+    display_name: DeepSeek V3 (Thinking)
+    use: src.models.patched_deepseek:PatchedChatDeepSeek
+    model: deepseek-reasoner
+    api_key: $DEEPSEEK_API_KEY
+    supports_thinking: true
+    when_thinking_enabled:
+      extra_body:
+        thinking:
+          type: enabled
+```
+
+<Info>
+  The `when_thinking_enabled` configuration varies by provider. Check your provider's documentation for the correct format.
+</Info>
+
+### Reasoning Effort
+
+<ParamField path="supports_reasoning_effort" type="boolean" default="false">
+  Enable adjustable reasoning effort levels (for models that support it).
+</ParamField>
+
+```yaml
+models:
+  - name: doubao-seed-1.8
+    display_name: Doubao-Seed-1.8
+    use: src.models.patched_deepseek:PatchedChatDeepSeek
+    model: doubao-seed-1-8-251228
+    api_base: https://ark.cn-beijing.volces.com/api/v3
+    api_key: $VOLCENGINE_API_KEY
+    supports_thinking: true
+    supports_reasoning_effort: true
+```
+
+## Provider Examples
+
+### OpenAI
+
+```yaml
+models:
+  - name: gpt-4
+    display_name: GPT-4
+    use: langchain_openai:ChatOpenAI
+    model: gpt-4
+    api_key: $OPENAI_API_KEY
+    max_tokens: 4096
+    temperature: 0.7
+    supports_vision: true
+```
+
+### Anthropic Claude
+
+```yaml
+models:
+  - name: claude-3-5-sonnet
+    display_name: Claude 3.5 Sonnet
+    use: langchain_anthropic:ChatAnthropic
+    model: claude-3-5-sonnet-20241022
+    api_key: $ANTHROPIC_API_KEY
+    max_tokens: 8192
+    supports_vision: true
+```
+
+### Google Gemini
+
+```yaml
+models:
+  - name: gemini-2.5-pro
+    display_name: Gemini 2.5 Pro
+    use: langchain_google_genai:ChatGoogleGenerativeAI
+    model: gemini-2.5-pro
+    google_api_key: $GOOGLE_API_KEY
+    max_tokens: 8192
+    supports_vision: true
+```
+
+<Note>
+  Google models use `google_api_key` instead of `api_key`
+</Note>
+
+### DeepSeek (with Thinking)
+
+```yaml
+models:
+  - name: deepseek-v3
+    display_name: DeepSeek V3 (Thinking)
+    use: src.models.patched_deepseek:PatchedChatDeepSeek
+    model: deepseek-reasoner
+    api_key: $DEEPSEEK_API_KEY
+    max_tokens: 16384
+    supports_thinking: true
+    supports_vision: false
+    when_thinking_enabled:
+      extra_body:
+        thinking:
+          type: enabled
+```
+
+### Novita AI (OpenAI-Compatible)
+
+```yaml
+models:
+  - name: novita-deepseek-v3.2
+    display_name: Novita DeepSeek V3.2
+    use: langchain_openai:ChatOpenAI
+    model: deepseek/deepseek-v3.2
+    api_key: $NOVITA_API_KEY
+    base_url: https://api.novita.ai/openai  # Custom endpoint
+    max_tokens: 4096
+    temperature: 0.7
+    supports_thinking: true
+    supports_vision: true
+    when_thinking_enabled:
+      extra_body:
+        thinking:
+          type: enabled
+```
+
+### Volcengine Doubao
+
+```yaml
+models:
+  - name: doubao-seed-1.8
+    display_name: Doubao-Seed-1.8
+    use: src.models.patched_deepseek:PatchedChatDeepSeek
+    model: doubao-seed-1-8-251228
+    api_base: https://ark.cn-beijing.volces.com/api/v3
+    api_key: $VOLCENGINE_API_KEY
+    supports_thinking: true
+    supports_vision: true
+    supports_reasoning_effort: true
+    when_thinking_enabled:
+      extra_body:
+        thinking:
+          type: enabled
+```
+
+### Moonshot Kimi
+
+```yaml
+models:
+  - name: kimi-k2.5
+    display_name: Kimi K2.5
+    use: src.models.patched_deepseek:PatchedChatDeepSeek
+    model: kimi-k2.5
+    api_base: https://api.moonshot.cn/v1
+    api_key: $MOONSHOT_API_KEY
+    max_tokens: 32768
+    supports_thinking: true
+    supports_vision: true
+    when_thinking_enabled:
+      extra_body:
+        thinking:
+          type: enabled
+```
+
+## Model Selection
+
+The first model in the `models` list is used as the default model for:
+- Conversation responses
+- Title generation (unless overridden)
+- Summarization (unless overridden)
+- Memory updates (unless overridden)
+
+```yaml
+models:
+  - name: gpt-4                    # Default model
+    # ...
+  - name: gpt-4-vision             # Available for selection
+    # ...
+  - name: claude-3-5-sonnet        # Available for selection
+    # ...
+```
+
+## Programmatic Access
+
+Access model configuration in Python:
+
+```python
+from src.config.app_config import get_app_config
+
+config = get_app_config()
+
+# Get specific model
+model_config = config.get_model_config("gpt-4")
+if model_config:
+    print(f"Model: {model_config.display_name}")
+    print(f"Supports vision: {model_config.supports_vision}")
+    print(f"Supports thinking: {model_config.supports_thinking}")
+
+# List all models
+for model in config.models:
+    print(f"- {model.name}: {model.display_name}")
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Environment Variables for API Keys" icon="key">
+    Never hardcode API keys in configuration files. Always use environment variables:
+    
+    ```yaml
+    api_key: $OPENAI_API_KEY  # ✅ Good
+    api_key: sk-proj-abc123   # ❌ Bad - security risk
+    ```
+  </Accordion>
+  
+  <Accordion title="Configure Multiple Models" icon="layer-group">
+    Set up multiple models for different use cases:
+    - Fast, cost-effective model as default
+    - Powerful model for complex tasks
+    - Vision-enabled model for image processing
+    - Thinking model for reasoning tasks
+  </Accordion>
+  
+  <Accordion title="Set Appropriate Token Limits" icon="ruler">
+    Configure `max_tokens` based on your use case:
+    - Lower values (1000-4000) for quick interactions
+    - Higher values (8000+) for code generation and long documents
+  </Accordion>
+  
+  <Accordion title="Test Vision Support" icon="image">
+    Not all models support vision. Test image processing capabilities before enabling:
+    
+    ```yaml
+    supports_vision: true  # Only set if model truly supports images
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Environment Variables Reference
+
+Common environment variables for model configuration:
+
+| Variable | Provider | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | OpenAI | OpenAI API key |
+| `ANTHROPIC_API_KEY` | Anthropic | Anthropic API key |
+| `GOOGLE_API_KEY` | Google | Google AI API key |
+| `DEEPSEEK_API_KEY` | DeepSeek | DeepSeek API key |
+| `NOVITA_API_KEY` | Novita AI | Novita AI API key |
+| `VOLCENGINE_API_KEY` | Volcengine | Volcengine (Doubao) API key |
+| `MOONSHOT_API_KEY` | Moonshot | Moonshot (Kimi) API key |
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="ValueError: Environment variable not found" icon="triangle-exclamation">
+    This error occurs when a referenced environment variable is not set:
+    
+    ```bash
+    # Set the missing variable
+    export OPENAI_API_KEY="your-api-key"
+    
+    # Or add to .env file
+    echo "OPENAI_API_KEY=your-api-key" >> .env
+    ```
+  </Accordion>
+  
+  <Accordion title="ModuleNotFoundError: No module named 'langchain_xxx'" icon="triangle-exclamation">
+    Install the required LangChain provider package:
+    
+    ```bash
+    # OpenAI
+    pip install langchain-openai
+    
+    # Anthropic
+    pip install langchain-anthropic
+    
+    # Google
+    pip install langchain-google-genai
+    ```
+  </Accordion>
+  
+  <Accordion title="Model doesn't support vision/thinking" icon="triangle-exclamation">
+    Check the provider's documentation for supported features. Not all models support vision or extended reasoning.
+    
+    Set the flags correctly:
+    ```yaml
+    supports_vision: false      # If model doesn't support images
+    supports_thinking: false    # If model doesn't support reasoning
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Sandbox Configuration" icon="box" href="/configuration/sandbox-modes">
+    Configure execution environments
+  </Card>
+  <Card title="Tools Configuration" icon="wrench" href="/reference/tools">
+    Set up tools and capabilities
+  </Card>
+</CardGroup>

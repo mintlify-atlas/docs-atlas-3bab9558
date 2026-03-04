@@ -1,0 +1,625 @@
+---
+title: Reflection System
+description: Dynamic module loading with resolve_variable() and resolve_class()
+---
+
+DeerFlow's reflection system (`backend/src/reflection/resolvers.py`) enables dynamic loading of Python modules, classes, and variables from string paths. This powers the configuration-driven architecture, allowing users to add new models, tools, and providers without modifying code.
+
+## Core Functions
+
+### resolve_variable()
+
+```python
+def resolve_variable[T](
+    variable_path: str,
+    expected_type: type[T] | tuple[type, ...] | None = None,
+) -> T:
+    """Resolve a variable from a path.
+    
+    Args:
+        variable_path: Path to variable (e.g., "module.submodule:variable_name")
+        expected_type: Optional type(s) to validate against (uses isinstance())
+    
+    Returns:
+        The resolved variable.
+    
+    Raises:
+        ImportError: If module path invalid or attribute doesn't exist.
+        ValueError: If resolved variable doesn't match expected_type.
+    """
+```
+
+**Location**: `backend/src/reflection/resolvers.py:28-73`
+
+### resolve_class()
+
+```python
+def resolve_class[T](
+    class_path: str,
+    base_class: type[T] | None = None
+) -> type[T]:
+    """Resolve a class from a module path.
+    
+    Args:
+        class_path: Path to class (e.g., "langchain_openai:ChatOpenAI")
+        base_class: Base class to validate subclass relationship
+    
+    Returns:
+        The resolved class.
+    
+    Raises:
+        ImportError: If module path invalid or attribute doesn't exist.
+        ValueError: If resolved object is not a class or not a subclass of base_class.
+    """
+```
+
+**Location**: `backend/src/reflection/resolvers.py:76-98`
+
+## Path Format
+
+Both functions use the format: `module.path:attribute_name`
+
+**Examples**:
+```python
+# Standard library
+"os.path:join"  # → os.path.join function
+"json:dumps"    # → json.dumps function
+
+# Third-party packages
+"langchain_openai:ChatOpenAI"      # → ChatOpenAI class
+"langchain.chat_models:BaseChatModel"  # → BaseChatModel class
+
+# DeerFlow modules
+"src.tools.builtins:bash_tool"    # → bash_tool variable
+"src.sandbox:LocalSandbox"         # → LocalSandbox class
+"src.models.factory:create_chat_model"  # → create_chat_model function
+```
+
+**Path Components**:
+- **Before `:`**: Module path (using `.` separators)
+- **After `:`**: Attribute name (variable, class, or function)
+
+## Usage Patterns
+
+### 1. Model Instantiation
+
+**Configuration** (`config.yaml`):
+```yaml
+models:
+  - name: gpt-4o
+    use: langchain_openai:ChatOpenAI
+    model: gpt-4o
+    temperature: 0.7
+```
+
+**Resolution** (`backend/src/models/factory.py:26`):
+```python
+from src.reflection import resolve_class
+from langchain.chat_models import BaseChatModel
+
+# Load model config
+model_config = get_app_config().get_model_config("gpt-4o")
+
+# Resolve class dynamically
+model_class = resolve_class(model_config.use, BaseChatModel)
+# → imports langchain_openai
+# → returns ChatOpenAI class
+# → validates ChatOpenAI is subclass of BaseChatModel
+
+# Instantiate with config parameters
+model_instance = model_class(
+    model="gpt-4o",
+    temperature=0.7
+)
+```
+
+**Benefits**:
+- Add new models without code changes
+- Type safety via `base_class` validation
+- Clear error messages for invalid configurations
+
+### 2. Tool Loading
+
+**Configuration** (`config.yaml`):
+```yaml
+tools:
+  - name: tavily_search
+    use: src.community.tavily.tools:tavily_search_tool
+    group: web
+  
+  - name: bash
+    use: src.sandbox.tools:bash_tool
+    group: sandbox
+```
+
+**Resolution** (`backend/src/tools/__init__.py`):
+```python
+from src.reflection import resolve_variable
+from langchain_core.tools import BaseTool
+
+def load_tools_from_config(config):
+    tools = []
+    for tool_config in config.tools:
+        # Resolve tool variable
+        tool = resolve_variable(
+            tool_config.use,
+            expected_type=BaseTool  # Validate it's a LangChain tool
+        )
+        tools.append(tool)
+    return tools
+```
+
+### 3. Sandbox Provider Selection
+
+**Configuration** (`config.yaml`):
+```yaml
+sandbox:
+  use: src.sandbox.local.provider:LocalSandboxProvider
+  # or
+  # use: src.community.aio_sandbox.provider:AioSandboxProvider
+```
+
+**Resolution** (`backend/src/sandbox/__init__.py`):
+```python
+from src.reflection import resolve_class
+from src.sandbox.sandbox import SandboxProvider
+
+def get_sandbox_provider() -> SandboxProvider:
+    config = get_app_config()
+    
+    # Resolve provider class
+    provider_class = resolve_class(
+        config.sandbox.use,
+        base_class=SandboxProvider
+    )
+    
+    # Instantiate provider
+    return provider_class(config.sandbox)
+```
+
+## Error Handling
+
+### Missing Module
+
+```python
+try:
+    tool = resolve_variable("nonexistent.module:tool")
+except ImportError as e:
+    print(e)
+    # ImportError: Could not import module nonexistent.module.
+    #              Missing dependency 'nonexistent'.
+    #              Install with `uv add nonexistent`, then restart.
+```
+
+### Missing Attribute
+
+```python
+try:
+    model = resolve_class("langchain_openai:NonexistentModel")
+except ImportError as e:
+    print(e)
+    # ImportError: Module langchain_openai does not define a
+    #              NonexistentModel attribute/class
+```
+
+### Type Validation Failure
+
+```python
+try:
+    # Expect a function, but got a class
+    func = resolve_variable(
+        "langchain_openai:ChatOpenAI",
+        expected_type=Callable  # ChatOpenAI is a class, not callable
+    )
+except ValueError as e:
+    print(e)
+    # ValueError: langchain_openai:ChatOpenAI is not an instance of Callable,
+    #             got type
+```
+
+### Subclass Validation Failure
+
+```python
+try:
+    # Expect subclass of BaseChatModel, but got wrong type
+    model_class = resolve_class(
+        "langchain_core.tools:BaseTool",  # This is a tool, not a model
+        base_class=BaseChatModel
+    )
+except ValueError as e:
+    print(e)
+    # ValueError: langchain_core.tools:BaseTool is not a subclass of
+    #             BaseChatModel
+```
+
+## Dependency Hints
+
+The reflection system provides actionable install hints for missing dependencies:
+
+```python
+MODULE_TO_PACKAGE_HINTS = {
+    "langchain_google_genai": "langchain-google-genai",
+    "langchain_anthropic": "langchain-anthropic",
+    "langchain_openai": "langchain-openai",
+    "langchain_deepseek": "langchain-deepseek",
+}
+
+def _build_missing_dependency_hint(module_path: str, err: ImportError) -> str:
+    """Build actionable hint when module import fails."""
+    module_root = module_path.split(".", 1)[0]
+    missing_module = getattr(err, "name", None) or module_root
+    
+    # Prefer provider package hints for known integrations
+    package_name = MODULE_TO_PACKAGE_HINTS.get(module_root)
+    if package_name is None:
+        package_name = MODULE_TO_PACKAGE_HINTS.get(
+            missing_module,
+            missing_module.replace("_", "-")
+        )
+    
+    return (
+        f"Missing dependency '{missing_module}'. "
+        f"Install it with `uv add {package_name}` "
+        f"(or `pip install {package_name}`), then restart DeerFlow."
+    )
+```
+
+**Example Error**:
+
+```
+ImportError: Could not import module langchain_google_genai.
+Missing dependency 'google-generativeai'.
+Install it with `uv add langchain-google-genai` (or `pip install langchain-google-genai`), then restart DeerFlow.
+```
+
+## Implementation Details
+
+### Path Parsing
+
+```python
+try:
+    module_path, variable_name = variable_path.rsplit(":", 1)
+except ValueError as err:
+    raise ImportError(
+        f"{variable_path} doesn't look like a variable path. "
+        "Example: parent_package.sub_package.module:variable_name"
+    ) from err
+```
+
+**Validation**:
+- Must contain exactly one `:` separator
+- Module path uses `.` separators (standard Python import format)
+- Attribute name cannot contain `.` or `:`
+
+### Module Import
+
+```python
+from importlib import import_module
+
+try:
+    module = import_module(module_path)
+except ImportError as err:
+    module_root = module_path.split(".", 1)[0]
+    err_name = getattr(err, "name", None)
+    
+    if isinstance(err, ModuleNotFoundError) or err_name == module_root:
+        # Missing module - provide install hint
+        hint = _build_missing_dependency_hint(module_path, err)
+        raise ImportError(f"Could not import module {module_path}. {hint}") from err
+    else:
+        # Other import error - preserve original message
+        raise ImportError(f"Error importing module {module_path}: {err}") from err
+```
+
+**Error Distinction**:
+- `ModuleNotFoundError`: Package not installed → Install hint
+- Other `ImportError`: Syntax error, circular import, etc. → Original error
+
+### Attribute Resolution
+
+```python
+try:
+    variable = getattr(module, variable_name)
+except AttributeError as err:
+    raise ImportError(
+        f"Module {module_path} does not define a {variable_name} "
+        "attribute/class"
+    ) from err
+```
+
+### Type Validation (resolve_variable)
+
+```python
+if expected_type is not None:
+    if not isinstance(variable, expected_type):
+        type_name = (
+            expected_type.__name__
+            if isinstance(expected_type, type)
+            else " or ".join(t.__name__ for t in expected_type)
+        )
+        raise ValueError(
+            f"{variable_path} is not an instance of {type_name}, "
+            f"got {type(variable).__name__}"
+        )
+```
+
+**Supports**:
+- Single type: `expected_type=BaseTool`
+- Multiple types: `expected_type=(BaseTool, StructuredTool)`
+- Uses `isinstance()` for validation
+
+### Class Validation (resolve_class)
+
+```python
+model_class = resolve_variable(class_path, expected_type=type)
+
+if not isinstance(model_class, type):
+    raise ValueError(f"{class_path} is not a valid class")
+
+if base_class is not None and not issubclass(model_class, base_class):
+    raise ValueError(
+        f"{class_path} is not a subclass of {base_class.__name__}"
+    )
+```
+
+**Two-Step Validation**:
+1. Verify resolved object is a class (using `isinstance(obj, type)`)
+2. Verify class is subclass of base_class (using `issubclass()`)
+
+## Advanced Usage
+
+### 1. Dynamic Tool Registration
+
+```python
+from src.reflection import resolve_variable
+from langchain_core.tools import BaseTool
+
+class ToolRegistry:
+    def __init__(self):
+        self._tools = {}
+    
+    def register_from_config(self, tool_configs):
+        for config in tool_configs:
+            tool = resolve_variable(
+                config["use"],
+                expected_type=BaseTool
+            )
+            self._tools[config["name"]] = tool
+    
+    def get_tool(self, name: str) -> BaseTool:
+        return self._tools[name]
+
+# Usage
+registry = ToolRegistry()
+registry.register_from_config([
+    {"name": "search", "use": "src.community.tavily:tavily_search_tool"},
+    {"name": "bash", "use": "src.sandbox.tools:bash_tool"}
+])
+
+search_tool = registry.get_tool("search")
+```
+
+### 2. Plugin System
+
+```python
+from src.reflection import resolve_class
+
+class Plugin:
+    def execute(self):
+        raise NotImplementedError
+
+class PluginLoader:
+    def load_plugin(self, plugin_path: str) -> Plugin:
+        plugin_class = resolve_class(plugin_path, base_class=Plugin)
+        return plugin_class()
+
+# User's plugin
+class MyPlugin(Plugin):
+    def execute(self):
+        print("My plugin executed!")
+
+# Load dynamically
+loader = PluginLoader()
+plugin = loader.load_plugin("user.plugins:MyPlugin")
+plugin.execute()
+```
+
+### 3. Configuration-Driven Middleware
+
+```python
+from src.reflection import resolve_class
+from langchain.agents.middleware import AgentMiddleware
+
+def load_middlewares_from_config(config):
+    middlewares = []
+    for mw_config in config.middlewares:
+        mw_class = resolve_class(
+            mw_config["use"],
+            base_class=AgentMiddleware
+        )
+        mw_instance = mw_class(**mw_config.get("params", {}))
+        middlewares.append(mw_instance)
+    return middlewares
+
+# config.yaml
+# middlewares:
+#   - use: src.agents.middlewares:TitleMiddleware
+#     params: {}
+#   - use: src.agents.middlewares:MemoryMiddleware
+#     params:
+#       agent_name: null
+```
+
+## Testing
+
+```python
+import pytest
+from src.reflection import resolve_variable, resolve_class
+from langchain.chat_models import BaseChatModel
+
+def test_resolve_variable_success():
+    func = resolve_variable("os.path:join")
+    assert callable(func)
+    assert func("a", "b") == "a/b"  # or "a\\b" on Windows
+
+def test_resolve_variable_with_type():
+    from langchain_core.tools import BaseTool
+    from src.sandbox.tools import bash_tool
+    
+    tool = resolve_variable(
+        "src.sandbox.tools:bash_tool",
+        expected_type=BaseTool
+    )
+    assert tool == bash_tool
+
+def test_resolve_class_success():
+    from langchain_openai import ChatOpenAI
+    
+    model_class = resolve_class(
+        "langchain_openai:ChatOpenAI",
+        base_class=BaseChatModel
+    )
+    assert model_class == ChatOpenAI
+    assert issubclass(model_class, BaseChatModel)
+
+def test_resolve_missing_module():
+    with pytest.raises(ImportError, match="Install it with `uv add"):
+        resolve_variable("nonexistent.module:variable")
+
+def test_resolve_missing_attribute():
+    with pytest.raises(ImportError, match="does not define"):
+        resolve_variable("os:nonexistent_function")
+
+def test_resolve_wrong_type():
+    with pytest.raises(ValueError, match="not an instance of"):
+        resolve_variable(
+            "langchain_openai:ChatOpenAI",
+            expected_type=int  # ChatOpenAI is a class, not an int
+        )
+
+def test_resolve_class_not_subclass():
+    from langchain_core.tools import BaseTool
+    
+    with pytest.raises(ValueError, match="not a subclass of"):
+        resolve_class(
+            "langchain_core.tools:BaseTool",
+            base_class=BaseChatModel  # BaseTool is not a chat model
+        )
+```
+
+## Performance Considerations
+
+### Caching
+
+Reflection calls are typically executed once at startup, not per-request:
+
+```python
+# Good: Resolve once, reuse instance
+class ModelFactory:
+    def __init__(self, config):
+        self._model_class = resolve_class(
+            config.use,
+            BaseChatModel
+        )
+    
+    def create_model(self, **kwargs):
+        return self._model_class(**kwargs)  # Reuse resolved class
+
+# Bad: Resolve on every call
+def create_model(config, **kwargs):
+    model_class = resolve_class(config.use, BaseChatModel)  # Slow!
+    return model_class(**kwargs)
+```
+
+### Import Cost
+
+First import of a module may be slow (e.g., TensorFlow, PyTorch):
+
+```python
+# Strategy: Lazy loading
+class LazyModel:
+    def __init__(self, model_path: str):
+        self._model_path = model_path
+        self._model_class = None
+    
+    def _ensure_loaded(self):
+        if self._model_class is None:
+            self._model_class = resolve_class(
+                self._model_path,
+                BaseChatModel
+            )
+    
+    def invoke(self, *args, **kwargs):
+        self._ensure_loaded()  # Import on first use
+        return self._model_class(*args, **kwargs)
+```
+
+## Security Considerations
+
+### Path Injection
+
+**Risk**: User-controlled paths could import arbitrary modules.
+
+**Mitigation**: Validate paths against allowlist:
+
+```python
+ALLOWED_MODULE_PREFIXES = [
+    "langchain",
+    "langchain_",
+    "src."
+]
+
+def resolve_safe(variable_path: str):
+    module_path = variable_path.split(":")[0]
+    
+    if not any(module_path.startswith(prefix) for prefix in ALLOWED_MODULE_PREFIXES):
+        raise ValueError(f"Module path not allowed: {module_path}")
+    
+    return resolve_variable(variable_path)
+```
+
+### Code Execution
+
+Reflection enables arbitrary code execution if config is user-controlled.
+
+**Best Practice**: Load config from trusted sources only (local files, not user input).
+
+## Best Practices
+
+1. **Always validate types**:
+   ```python
+   tool = resolve_variable(path, expected_type=BaseTool)
+   ```
+
+2. **Use base_class for classes**:
+   ```python
+   model_class = resolve_class(path, base_class=BaseChatModel)
+   ```
+
+3. **Cache resolved values**:
+   ```python
+   self._cached_class = resolve_class(path, BaseClass)
+   ```
+
+4. **Handle errors gracefully**:
+   ```python
+   try:
+       tool = resolve_variable(path)
+   except ImportError as e:
+       logger.error(f"Failed to load tool: {e}")
+       return default_tool
+   ```
+
+5. **Document expected types in config schema**:
+   ```yaml
+   # config.yaml
+   tools:
+     - name: my_tool
+       use: src.tools:my_tool  # Must be a BaseTool instance
+   ```
+
+## See Also
+
+- [Model Factory](/advanced/model-factory) - Primary consumer of reflection system
+- [Configuration](/configuration/overview) - How config files drive reflection
+- [Tools](/core-concepts/tools) - Dynamic tool loading via reflection

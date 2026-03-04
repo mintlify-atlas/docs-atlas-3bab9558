@@ -1,0 +1,756 @@
+---
+title: Context Engineering
+description: Summarization, context management, token limits, and isolated sub-agent contexts
+---
+
+DeerFlow implements sophisticated context engineering to handle conversations of arbitrary length while staying within model token limits. This includes automatic summarization, intelligent context retention, memory injection, and isolated sub-agent contexts.
+
+## Overview
+
+Context engineering addresses three core challenges:
+
+1. **Token Limit Management** - Prevent exceeding model's maximum input tokens
+2. **Relevant Context Retention** - Keep recent, important information while discarding noise
+3. **Context Isolation** - Separate main agent and sub-agent conversation contexts
+
+## Automatic Summarization
+
+### Configuration
+
+Defined in `config.yaml` under `summarization` key:
+
+```yaml
+summarization:
+  enabled: true
+  model_name: null  # null = use lightweight model (default)
+  
+  # Trigger: One or more thresholds that activate summarization
+  trigger:
+    - type: fraction  # 80% of model's max input tokens
+      value: 0.8
+    - type: messages  # OR 50 messages
+      value: 50
+  
+  # Keep: How much context to preserve after summarization
+  keep:
+    type: messages
+    value: 20  # Keep last 20 messages
+  
+  # Trim: Max tokens when preparing messages for summarization
+  trim_tokens_to_summarize: 4000
+  
+  # Custom summary prompt (optional)
+  summary_prompt: null
+```
+
+### Trigger Types
+
+Summarization activates when **any** trigger threshold is met:
+
+#### 1. Fraction Trigger
+
+```yaml
+trigger:
+  type: fraction
+  value: 0.8  # 80% of model's max_input_tokens
+```
+
+**Behavior**:
+- Calculates current token count via model's tokenizer
+- Compares against model's `max_input_tokens` config
+- Triggers at `0.8 * max_input_tokens`
+
+**Use Case**: Prevent approaching model's hard limit (leaves 20% buffer for system prompt, tools, etc.)
+
+#### 2. Tokens Trigger
+
+```yaml
+trigger:
+  type: tokens
+  value: 4000  # Absolute token count
+```
+
+**Behavior**:
+- Counts tokens in message history
+- Triggers when count exceeds 4000
+
+**Use Case**: Fixed budget regardless of model capabilities
+
+#### 3. Messages Trigger
+
+```yaml
+trigger:
+  type: messages
+  value: 50  # Number of messages
+```
+
+**Behavior**:
+- Counts messages in conversation
+- Triggers at 50 messages
+
+**Use Case**: Simple threshold for long conversations (UI performance, checkpoint size)
+
+### Keep Policies
+
+After summarization triggers, the **keep policy** determines how much recent context to preserve.
+
+#### Messages Keep
+
+```yaml
+keep:
+  type: messages
+  value: 20  # Preserve last 20 messages
+```
+
+**Behavior**:
+- Keeps most recent 20 messages verbatim
+- Summarizes everything before that
+- Final history: `[SystemMessage(summary), ...last 20 messages]`
+
+#### Tokens Keep
+
+```yaml
+keep:
+  type: tokens
+  value: 3000  # Preserve last ~3000 tokens
+```
+
+**Behavior**:
+- Calculates token count backwards from last message
+- Keeps messages until total reaches ~3000 tokens
+- Summarizes remainder
+
+#### Fraction Keep
+
+```yaml
+keep:
+  type: fraction
+  value: 0.3  # Preserve last 30% of max_input_tokens
+```
+
+**Behavior**:
+- Calculates `0.3 * model.max_input_tokens`
+- Keeps that many tokens from end of history
+
+### Model Selection
+
+```yaml
+summarization:
+  model_name: "gpt-4o-mini"  # Use specific model for summarization
+```
+
+**Options**:
+- `null` (default): Uses lightweight model via `create_chat_model(thinking_enabled=False)`
+- Model name string: Uses specified model from `config.yaml` models list
+
+**Recommendation**: Use cheap, fast model (summarization quality less critical than speed/cost)
+
+### Implementation
+
+Summarization handled by LangChain's `SummarizationMiddleware`, configured in `backend/src/agents/lead_agent/agent.py:41-80`:
+
+```python
+def _create_summarization_middleware() -> SummarizationMiddleware | None:
+    config = get_summarization_config()
+    
+    if not config.enabled:
+        return None
+    
+    # Convert config to middleware parameters
+    trigger = None
+    if config.trigger:
+        if isinstance(config.trigger, list):
+            trigger = [t.to_tuple() for t in config.trigger]
+        else:
+            trigger = config.trigger.to_tuple()
+    
+    keep = config.keep.to_tuple()
+    
+    # Model selection
+    if config.model_name:
+        model = config.model_name  # Use specified model
+    else:
+        model = create_chat_model(thinking_enabled=False)  # Lightweight
+    
+    # Build middleware
+    kwargs = {
+        "model": model,
+        "trigger": trigger,
+        "keep": keep
+    }
+    
+    if config.trim_tokens_to_summarize is not None:
+        kwargs["trim_tokens_to_summarize"] = config.trim_tokens_to_summarize
+    
+    if config.summary_prompt is not None:
+        kwargs["summary_prompt"] = config.summary_prompt
+    
+    return SummarizationMiddleware(**kwargs)
+```
+
+### Summarization Process
+
+1. **Trigger Check** (`before_model`):
+   - Count current tokens/messages
+   - Compare against all trigger thresholds
+   - If any threshold met, proceed to step 2
+
+2. **Message Preparation**:
+   - Split history into `to_summarize` and `to_keep`
+   - Trim `to_summarize` to `trim_tokens_to_summarize` tokens (default 4000)
+   - This prevents overwhelming summarization model
+
+3. **Summary Generation**:
+   - Invoke model with `to_summarize` messages
+   - Default prompt: "Summarize the following conversation concisely"
+   - Custom prompt via `summary_prompt` config
+
+4. **History Reconstruction**:
+   - Create `SystemMessage` with summary
+   - Append `to_keep` messages (recent context)
+   - Replace state's message history
+
+**Example**:
+
+```
+Before summarization (50 messages, 8000 tokens):
+[HumanMessage(1), AIMessage(1), ..., HumanMessage(50), AIMessage(50)]
+
+After summarization (keep last 20 messages):
+[
+    SystemMessage("Summary: User asked about X, agent explained Y, then..."),
+    HumanMessage(31), AIMessage(31), ..., HumanMessage(50), AIMessage(50)
+]
+
+Result: 21 messages, ~3500 tokens
+```
+
+## Memory Injection
+
+DeerFlow's memory system complements summarization by injecting persistent facts into every turn.
+
+### Memory Structure
+
+Stored in `backend/.deer-flow/memory.json`:
+
+```json
+{
+  "userContext": {
+    "workContext": "Software engineer at a startup building AI agents",
+    "personalContext": "Prefers Python and functional programming",
+    "topOfMind": "Currently debugging LangGraph middleware issues"
+  },
+  "history": {
+    "recentMonths": "Implemented authentication system in March 2024",
+    "earlierContext": "Migrated from monolith to microservices in 2023",
+    "longTermBackground": "Has been working with LangChain since 2022"
+  },
+  "facts": [
+    {
+      "id": "fact-1",
+      "content": "User prefers async/await over callbacks",
+      "category": "preference",
+      "confidence": 0.95,
+      "createdAt": "2024-03-15T10:30:00Z",
+      "source": "conversation"
+    },
+    {
+      "id": "fact-2",
+      "content": "User's project uses PostgreSQL for checkpointing",
+      "category": "knowledge",
+      "confidence": 0.90,
+      "createdAt": "2024-03-14T15:20:00Z",
+      "source": "conversation"
+    }
+  ]
+}
+```
+
+### Injection Process
+
+**Location**: System prompt template in `backend/src/agents/lead_agent/prompt.py`
+
+```python
+def apply_prompt_template(agent_name: str | None = None, **kwargs) -> str:
+    template = """You are a helpful AI assistant...
+    
+    <memory>
+    {memory}
+    </memory>
+    
+    <skills>
+    {skills}
+    </skills>
+    
+    Current date: {current_date}
+    """
+    
+    # Load memory
+    memory = load_memory(agent_name)  # Returns formatted string
+    
+    # Inject into prompt
+    return template.format(
+        memory=memory,
+        skills=format_skills(get_enabled_skills()),
+        current_date=datetime.now().strftime("%Y-%m-%d")
+    )
+```
+
+**Memory Formatting** (`backend/src/agents/memory/updater.py`):
+
+```python
+def format_memory_for_injection(memory_data: dict, max_tokens: int = 2000) -> str:
+    """Format memory data for injection into system prompt."""
+    sections = []
+    
+    # User context
+    if memory_data.get("userContext"):
+        sections.append("## User Context")
+        ctx = memory_data["userContext"]
+        if ctx.get("workContext"):
+            sections.append(f"Work: {ctx['workContext']}")
+        if ctx.get("personalContext"):
+            sections.append(f"Personal: {ctx['personalContext']}")
+        if ctx.get("topOfMind"):
+            sections.append(f"Top of mind: {ctx['topOfMind']}")
+    
+    # Recent history
+    if memory_data.get("history"):
+        sections.append("\n## Recent History")
+        hist = memory_data["history"]
+        if hist.get("recentMonths"):
+            sections.append(f"Recent: {hist['recentMonths']}")
+    
+    # Top facts (sorted by confidence)
+    facts = memory_data.get("facts", [])
+    if facts:
+        sections.append("\n## Key Facts")
+        top_facts = sorted(facts, key=lambda f: f["confidence"], reverse=True)[:15]
+        for fact in top_facts:
+            sections.append(f"- {fact['content']} (confidence: {fact['confidence']:.2f})")
+    
+    formatted = "\n".join(sections)
+    
+    # Trim to max_tokens
+    if count_tokens(formatted) > max_tokens:
+        formatted = trim_to_tokens(formatted, max_tokens)
+        formatted += "\n...\n(Memory truncated to fit token limit)"
+    
+    return formatted
+```
+
+### Memory Configuration
+
+```yaml
+memory:
+  enabled: true
+  injection_enabled: true  # Inject into system prompt
+  storage_path: "backend/.deer-flow/memory.json"
+  debounce_seconds: 30  # Wait 30s before processing updates
+  model_name: null  # Use lightweight model for extraction
+  max_facts: 100  # Store max 100 facts
+  fact_confidence_threshold: 0.7  # Only store facts with confidence >= 0.7
+  max_injection_tokens: 2000  # Max tokens for memory in system prompt
+```
+
+**Token Budget**:
+- `max_injection_tokens: 2000` ensures memory doesn't dominate prompt
+- Priority: User context > Recent history > Top 15 facts (by confidence)
+- If exceeds budget, truncates oldest/lowest-confidence facts first
+
+### Memory Update Flow
+
+1. **Queue** (`MemoryMiddleware.after_agent`):
+   ```python
+   # Filter to user messages + final AI responses (no tool calls)
+   filtered = _filter_messages_for_memory(state["messages"])
+   
+   # Queue for background processing
+   get_memory_queue().add(
+       thread_id=thread_id,
+       messages=filtered,
+       agent_name=agent_name
+   )
+   ```
+
+2. **Debounce** (`MemoryQueue`):
+   - Waits `debounce_seconds` (default 30s)
+   - Batches multiple turns if conversation continues
+   - Deduplicates per-thread updates
+
+3. **Extract** (`MemoryUpdater`):
+   - Invokes LLM with conversation history
+   - Extracts new facts, updates context summaries
+   - Assigns confidence scores (0-1)
+
+4. **Persist** (Atomic file I/O):
+   ```python
+   # Write to temp file
+   temp_path = storage_path.with_suffix(".tmp")
+   temp_path.write_text(json.dumps(memory_data, indent=2))
+   
+   # Atomic rename
+   temp_path.replace(storage_path)
+   
+   # Invalidate cache
+   invalidate_memory_cache()
+   ```
+
+5. **Inject** (Next turn):
+   - Load memory from `storage_path`
+   - Format for injection (trim to `max_injection_tokens`)
+   - Insert into system prompt `<memory>` tags
+
+## Context Isolation for Sub-Agents
+
+Sub-agents run in **completely isolated contexts** to prevent pollution of main conversation.
+
+### Motivation
+
+**Problem**: Without isolation, sub-agent's exploration pollutes main context:
+
+```
+Main Agent:
+  User: "Analyze sales trends in data.csv"
+  Agent: "I'll delegate this to a specialist" [calls task tool]
+
+Sub-Agent (in same context):
+  SA: [reads file] [calls bash: head data.csv] [calls bash: wc -l data.csv]
+  SA: [reads file again] [calls bash: python analyze.py]
+  ... 50 messages of exploration ...
+  SA: "Analysis complete: 5% growth"
+
+Main Agent (now has 50+ extra messages):
+  Agent: "The analysis shows..." [context bloated, summarization triggered]
+```
+
+**Solution**: Sub-agent runs in isolated thread:
+
+```
+Main Agent (thread-1):
+  User: "Analyze sales trends in data.csv"
+  Agent: "I'll delegate this to a specialist" [calls task tool]
+  [waits for sub-agent...]
+  Agent: "The analysis shows 5% growth" [receives only final result]
+
+Sub-Agent (thread-subagent-123, isolated):
+  SA: [reads file] [calls bash: head data.csv] [calls bash: wc -l data.csv]
+  SA: [reads file again] [calls bash: python analyze.py]
+  ... 50 messages of exploration (not visible to main agent) ...
+  SA: "Analysis complete: 5% growth" [returns to main]
+```
+
+### Implementation
+
+**Task Tool** (`backend/src/tools/builtins/task_tool.py:28-78`):
+
+```python
+def task(
+    description: str,
+    prompt: str,
+    subagent_type: str = "general-purpose",
+    max_turns: int = 20,
+    runtime: ToolRuntimeContext = None
+):
+    """Delegate to subagent in isolated context."""
+    
+    # Extract parent context
+    thread_id = runtime.context.get("thread_id")
+    parent_artifacts = runtime.state.get("artifacts", [])
+    
+    # Create isolated subagent
+    executor = SubagentExecutor(
+        subagent_type=subagent_type,
+        prompt=prompt,
+        thread_id=thread_id,  # Parent thread for file access
+        max_turns=max_turns
+    )
+    
+    # Execute in background (isolated context)
+    result = executor.execute()
+    
+    # Return only final result to main agent
+    return result.output
+```
+
+**Subagent Executor** (`backend/src/subagents/executor.py:200-250`):
+
+```python
+class SubagentExecutor:
+    def execute(self) -> SubagentResult:
+        # Load subagent from registry
+        subagent_config = get_subagent(self.subagent_type)
+        
+        # Create isolated agent instance
+        agent = make_lead_agent(config={
+            "configurable": {
+                "agent_name": subagent_config.name,
+                "model_name": subagent_config.model,
+                "thinking_enabled": subagent_config.thinking_enabled,
+                "subagent_enabled": False  # No nested subagents
+            }
+        })
+        
+        # Execute with isolated context (new thread)
+        isolated_thread_id = f"subagent-{uuid.uuid4()}"
+        context = {"thread_id": isolated_thread_id}
+        
+        state = {"messages": [HumanMessage(content=self.prompt)]}
+        
+        # Stream execution (background thread)
+        for chunk in agent.stream(
+            state,
+            config={"configurable": {"thread_id": isolated_thread_id}},
+            context=context,
+            stream_mode="values"
+        ):
+            # Emit events to main agent
+            self._emit_event("task_running", chunk)
+            
+            if self._turn_count >= self.max_turns:
+                break
+        
+        # Extract final result
+        final_messages = chunk["messages"]
+        final_response = next(
+            (m.content for m in reversed(final_messages) if m.type == "ai"),
+            "No response"
+        )
+        
+        return SubagentResult(
+            status="completed",
+            output=final_response,
+            artifacts=chunk.get("artifacts", [])
+        )
+```
+
+### Context Sharing
+
+While **conversation context** is isolated, **file system access** is shared:
+
+**Shared**:
+- File system (via `thread_id` from parent)
+- Sandbox environment
+- Physical directories: `backend/.deer-flow/threads/{parent_thread_id}/`
+
+**Isolated**:
+- Message history
+- State (artifacts, todos, viewed_images)
+- LLM context window
+- Checkpoints (separate thread IDs)
+
+**Example**:
+
+```python
+# Main agent (thread-1)
+main_state = {
+    "messages": [HumanMessage("Analyze data.csv"), ...],
+    "artifacts": ["/mnt/user-data/outputs/report.pdf"],
+    "viewed_images": {"chart.png": {...}}
+}
+
+# Subagent (thread-subagent-123)
+subagent_state = {
+    "messages": [HumanMessage("Analyze CSV and create summary"), ...],
+    "artifacts": [],  # Empty, independent
+    "viewed_images": {}  # Empty, independent
+}
+
+# But both access same files:
+main: bash("ls /mnt/user-data/uploads")  # → ["data.csv"]
+sub:  bash("ls /mnt/user-data/uploads")  # → ["data.csv"] (same)
+
+main: read_file("/mnt/user-data/uploads/data.csv")  # Works
+sub:  read_file("/mnt/user-data/uploads/data.csv")  # Works (same file)
+```
+
+### Artifact Transfer
+
+Sub-agent artifacts can be inherited by main agent:
+
+```python
+# Subagent creates artifact
+sub_state["artifacts"] = ["/mnt/user-data/outputs/analysis.txt"]
+
+# Executor returns result with artifacts
+result = SubagentResult(
+    output="Analysis complete",
+    artifacts=sub_state["artifacts"]
+)
+
+# Main agent receives artifacts
+main_state["artifacts"] += result.artifacts  # Merge via reducer
+```
+
+## Token Accounting
+
+### Counting Tokens
+
+DeerFlow uses model-specific tokenizers:
+
+```python
+from langchain.chat_models import BaseChatModel
+
+def count_tokens(messages: list, model: BaseChatModel) -> int:
+    """Count tokens in message list using model's tokenizer."""
+    return model.get_num_tokens_from_messages(messages)
+
+# Used by SummarizationMiddleware
+token_count = count_tokens(state["messages"], model)
+max_tokens = model.max_input_tokens  # From model config
+
+if token_count > (max_tokens * 0.8):  # Fraction trigger
+    trigger_summarization()
+```
+
+### Token Budget Breakdown
+
+Typical token distribution for 8K context model:
+
+```
+Total: 8,000 tokens
+├── System Prompt: 1,500 tokens
+│   ├── Base prompt: 500
+│   ├── Memory: 500 (max_injection_tokens)
+│   ├── Skills: 300
+│   └── Instructions: 200
+├── Message History: 5,000 tokens
+│   ├── Kept after summarization: 3,000
+│   └── Buffer: 2,000
+└── Tools/Response: 1,500 tokens
+    ├── Tool definitions: 1,000
+    └── Response generation: 500
+```
+
+**Configuration Strategy**:
+- Set `summarization.trigger.value: 0.6` (60% threshold)
+- Set `summarization.keep.value: 0.4` (keep 40% = 3,200 tokens)
+- Set `memory.max_injection_tokens: 500` (6% of total)
+
+### Performance Impact
+
+**Summarization**:
+- Additional LLM call: ~1-2s latency
+- Cost: ~$0.01 per summarization (with GPT-4o-mini)
+- Frequency: Every 50 messages or 80% token limit
+
+**Memory Injection**:
+- Negligible latency (cached, loaded from disk)
+- Adds ~500 tokens to every request
+- Cost: ~$0.005 per request (at $2/M tokens)
+
+**Sub-Agent Isolation**:
+- No additional token cost (separate contexts)
+- Storage cost: Separate checkpoint per sub-agent thread
+- Cleanup: Periodic pruning of old sub-agent threads
+
+## Best Practices
+
+### 1. Choose Appropriate Triggers
+
+```yaml
+# For long-running conversations (CLI, Slack bot)
+summarization:
+  trigger:
+    - type: fraction
+      value: 0.7  # Summarize at 70% capacity
+    - type: messages
+      value: 100  # OR after 100 messages
+
+# For short sessions (web chat, API)
+summarization:
+  trigger:
+    - type: messages
+      value: 30  # Summarize after 30 messages
+  keep:
+    type: messages
+    value: 15  # Keep last 15
+```
+
+### 2. Balance Keep Policy
+
+```yaml
+# Keep more context (higher quality, more tokens)
+keep:
+  type: fraction
+  value: 0.5  # Keep 50% of history
+
+# Keep less context (faster, cheaper, risk losing info)
+keep:
+  type: messages
+  value: 10  # Keep only last 10 messages
+```
+
+### 3. Memory Token Budget
+
+```yaml
+# High token budget (richer context)
+memory:
+  max_injection_tokens: 3000
+
+# Low token budget (leave room for conversation)
+memory:
+  max_injection_tokens: 500
+```
+
+### 4. Sub-Agent Usage
+
+**Use sub-agents when**:
+- Task requires extensive exploration (e.g., "analyze this codebase")
+- Output is verbose (e.g., "run linter on all files")
+- Want to isolate errors (e.g., "try multiple approaches until one works")
+
+**Avoid sub-agents when**:
+- Task is simple (e.g., "read this file")
+- Need tight coordination (e.g., "implement feature and write tests together")
+- Context sharing critical (e.g., "continue from where we left off")
+
+## Monitoring & Debugging
+
+### Enable Debug Logging
+
+```python
+import logging
+logging.getLogger("langchain.agents.middleware").setLevel(logging.DEBUG)
+logging.getLogger("src.agents.memory").setLevel(logging.DEBUG)
+```
+
+### Summarization Events
+
+```
+[SummarizationMiddleware] Token count: 6500 / 8000 (81%)
+[SummarizationMiddleware] Trigger: fraction threshold met (0.8)
+[SummarizationMiddleware] Summarizing 30 messages, keeping last 20
+[SummarizationMiddleware] Summary generated: 150 tokens
+[SummarizationMiddleware] New message count: 21, token count: 3500
+```
+
+### Memory Events
+
+```
+[MemoryMiddleware] Queued conversation for thread-123 (5 messages)
+[MemoryQueue] Debouncing update for thread-123 (30s wait)
+[MemoryUpdater] Processing update for thread-123
+[MemoryUpdater] Extracted 3 new facts (confidence: 0.85, 0.78, 0.92)
+[MemoryUpdater] Updated userContext.topOfMind
+[MemoryUpdater] Memory persisted to backend/.deer-flow/memory.json
+```
+
+### Sub-Agent Events
+
+```
+[SubagentExecutor] Starting task: "Analyze data.csv"
+[SubagentExecutor] Isolated thread: subagent-abc123
+[SubagentExecutor] Turn 1/20 completed
+[SubagentExecutor] Turn 2/20 completed
+...
+[SubagentExecutor] Task completed after 8 turns
+[SubagentExecutor] Final output: "5% growth trend observed"
+[SubagentExecutor] Artifacts: ["/mnt/user-data/outputs/analysis.txt"]
+```
+
+## See Also
+
+- [Middleware Chain](/advanced/middleware-chain) - How summarization middleware fits into pipeline
+- [Thread State](/advanced/thread-state) - State management and persistence
+- [Memory System](/core-concepts/memory) - Memory extraction and injection details

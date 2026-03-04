@@ -1,0 +1,699 @@
+---
+title: Model Factory
+description: Dynamic model instantiation with reflection, thinking/vision support, and runtime configuration
+---
+
+DeerFlow's model factory (`backend/src/models/factory.py`) provides reflection-based model instantiation from configuration files, enabling dynamic provider support without hardcoding imports. The factory handles thinking modes, vision capabilities, and runtime parameter overrides.
+
+## Core Function: create_chat_model()
+
+```python
+from langchain.chat_models import BaseChatModel
+
+def create_chat_model(
+    name: str | None = None,
+    thinking_enabled: bool = False,
+    **kwargs
+) -> BaseChatModel:
+    """Create a chat model instance from config.
+    
+    Args:
+        name: Model name from config. If None, uses first model in config.
+        thinking_enabled: Enable extended thinking mode (if model supports it).
+        **kwargs: Runtime overrides for model parameters.
+    
+    Returns:
+        Instantiated chat model.
+    """
+```
+
+**Location**: `backend/src/models/factory.py:11-64`
+
+## Model Configuration
+
+### config.yaml Structure
+
+```yaml
+models:
+  - name: gpt-4o
+    display_name: GPT-4 Optimized
+    description: OpenAI's fastest flagship model
+    use: langchain_openai:ChatOpenAI
+    model: gpt-4o
+    temperature: 0.7
+    supports_thinking: true
+    supports_reasoning_effort: true
+    supports_vision: true
+    when_thinking_enabled:
+      extra_body:
+        thinking:
+          type: enabled
+          budget_tokens: 10000
+      reasoning_effort: high
+  
+  - name: claude-sonnet
+    display_name: Claude 3.5 Sonnet
+    description: Anthropic's balanced model
+    use: langchain_anthropic:ChatAnthropic
+    model: claude-3-5-sonnet-20241022
+    temperature: 0.7
+    max_tokens: 4096
+    supports_thinking: true
+    supports_vision: true
+    when_thinking_enabled:
+      extra_body:
+        thinking:
+          type: enabled
+          budget_tokens: 10000
+  
+  - name: deepseek-chat
+    display_name: DeepSeek Chat
+    description: DeepSeek's reasoning model
+    use: src.models.patched_deepseek:PatchedChatDeepSeek
+    model: deepseek-chat
+    base_url: $DEEPSEEK_BASE_URL
+    api_key: $DEEPSEEK_API_KEY
+    temperature: 1.0
+    supports_thinking: false
+    supports_vision: false
+```
+
+### Field Reference
+
+#### Core Fields
+
+- **`name`** (required): Unique identifier for model selection
+- **`display_name`**: Human-readable name for UI
+- **`description`**: Short description of model capabilities
+- **`use`** (required): Python import path for model class (e.g., `langchain_openai:ChatOpenAI`)
+
+#### Capability Flags
+
+- **`supports_thinking`**: Model supports extended thinking/reasoning modes
+- **`supports_reasoning_effort`**: Model supports OpenAI's `reasoning_effort` parameter
+- **`supports_vision`**: Model can process images (enables `ViewImageMiddleware`)
+
+#### Provider Parameters
+
+All additional fields passed to model constructor:
+
+```yaml
+# OpenAI-specific
+model: gpt-4o
+temperature: 0.7
+max_tokens: 4096
+
+# Anthropic-specific  
+model: claude-3-5-sonnet-20241022
+max_tokens: 4096
+
+# Custom base URL
+base_url: https://api.custom-provider.com
+api_key: $API_KEY  # Resolved from environment
+```
+
+#### when_thinking_enabled
+
+Overrides applied when `thinking_enabled=True`:
+
+```yaml
+when_thinking_enabled:
+  extra_body:  # OpenAI extended thinking
+    thinking:
+      type: enabled
+      budget_tokens: 10000
+  reasoning_effort: high  # o1 models
+```
+
+## Reflection-Based Instantiation
+
+The factory uses the reflection system to dynamically load model classes:
+
+```python
+from src.reflection import resolve_class
+
+# Load model config
+config = get_app_config()
+model_config = config.get_model_config(name or config.models[0].name)
+
+# Resolve class via reflection
+model_class = resolve_class(model_config.use, BaseChatModel)
+# e.g., resolve_class("langchain_openai:ChatOpenAI", BaseChatModel)
+# → imports langchain_openai, returns ChatOpenAI class, validates subclass
+```
+
+**Benefits**:
+- No hardcoded imports (`from langchain_openai import ChatOpenAI`)
+- Add new providers without code changes (just update `config.yaml`)
+- Clear error messages for missing dependencies
+
+## Thinking Mode Support
+
+### Enabling Thinking
+
+```python
+# Default model without thinking
+model = create_chat_model()
+
+# Enable thinking mode
+model = create_chat_model(thinking_enabled=True)
+
+# Specific model with thinking
+model = create_chat_model(name="gpt-4o", thinking_enabled=True)
+```
+
+### Implementation
+
+```python
+def create_chat_model(name=None, thinking_enabled=False, **kwargs):
+    # ...
+    model_settings = model_config.model_dump(
+        exclude_none=True,
+        exclude={
+            "use", "name", "display_name", "description",
+            "supports_thinking", "supports_reasoning_effort",
+            "when_thinking_enabled", "supports_vision"
+        }
+    )
+    
+    # Apply thinking overrides
+    if thinking_enabled and model_config.when_thinking_enabled:
+        if not model_config.supports_thinking:
+            raise ValueError(
+                f"Model {name} does not support thinking. "
+                "Set `supports_thinking: true` in config.yaml"
+            )
+        model_settings.update(model_config.when_thinking_enabled)
+    
+    # Disable thinking explicitly if not requested
+    if not thinking_enabled and model_config.when_thinking_enabled:
+        if model_config.when_thinking_enabled.get("extra_body", {}).get("thinking"):
+            kwargs.update({"extra_body": {"thinking": {"type": "disabled"}}})
+            kwargs.update({"reasoning_effort": "minimal"})
+    
+    # Handle reasoning_effort for models that don't support it
+    if not model_config.supports_reasoning_effort:
+        kwargs.update({"reasoning_effort": None})
+    
+    # Instantiate model
+    model_instance = model_class(**kwargs, **model_settings)
+    return model_instance
+```
+
+### Thinking Configurations
+
+#### OpenAI Extended Thinking
+
+```yaml
+when_thinking_enabled:
+  extra_body:
+    thinking:
+      type: enabled
+      budget_tokens: 10000  # Max tokens for thinking phase
+```
+
+**Behavior**: Model generates hidden thinking before response.
+
+#### OpenAI o1 Reasoning Effort
+
+```yaml
+supports_reasoning_effort: true
+when_thinking_enabled:
+  reasoning_effort: high  # low | medium | high
+```
+
+**Behavior**: Controls o1 model's reasoning intensity.
+
+#### Anthropic Extended Thinking
+
+```yaml
+when_thinking_enabled:
+  extra_body:
+    thinking:
+      type: enabled
+      budget_tokens: 10000
+```
+
+**Behavior**: Claude uses `<thinking>` tags in response.
+
+## Vision Support
+
+Models with `supports_vision: true` enable vision-specific features:
+
+### Configuration
+
+```yaml
+models:
+  - name: gpt-4o
+    supports_vision: true
+    # ...
+  
+  - name: claude-sonnet
+    supports_vision: true
+    # ...
+  
+  - name: gpt-4o-mini
+    supports_vision: false  # Text-only
+    # ...
+```
+
+### Impact on Agent
+
+**Middleware Chain** (`backend/src/agents/lead_agent/agent.py:236-241`):
+
+```python
+def _build_middlewares(config, model_name, agent_name=None):
+    # ...
+    
+    # Add ViewImageMiddleware only if model supports vision
+    app_config = get_app_config()
+    model_config = app_config.get_model_config(model_name)
+    if model_config and model_config.supports_vision:
+        middlewares.append(ViewImageMiddleware())
+    
+    # ...
+```
+
+**Tool Injection** (`backend/src/tools/__init__.py`):
+
+```python
+def get_available_tools(model_name=None, **kwargs):
+    tools = [...]
+    
+    # Add view_image tool only for vision models
+    model_config = get_app_config().get_model_config(model_name)
+    if model_config and model_config.supports_vision:
+        from src.tools.builtins import view_image_tool
+        tools.append(view_image_tool)
+    
+    return tools
+```
+
+## Runtime Parameter Overrides
+
+### Via Keyword Arguments
+
+```python
+# Override temperature
+model = create_chat_model(
+    name="gpt-4o",
+    temperature=0.9  # Override config's 0.7
+)
+
+# Override max_tokens
+model = create_chat_model(
+    name="claude-sonnet",
+    max_tokens=8000  # Override config's 4096
+)
+
+# Add custom parameters
+model = create_chat_model(
+    name="gpt-4o",
+    top_p=0.95,
+    frequency_penalty=0.5
+)
+```
+
+### Merge Behavior
+
+```python
+# Config settings
+model_settings = {
+    "model": "gpt-4o",
+    "temperature": 0.7,
+    "max_tokens": 4096
+}
+
+# Runtime overrides
+kwargs = {
+    "temperature": 0.9,
+    "top_p": 0.95
+}
+
+# Final parameters
+final = {**model_settings, **kwargs}
+# → {
+#     "model": "gpt-4o",
+#     "temperature": 0.9,  # Overridden
+#     "max_tokens": 4096,
+#     "top_p": 0.95        # Added
+# }
+
+model_instance = model_class(**final)
+```
+
+## Environment Variable Resolution
+
+Config values starting with `$` are resolved from environment:
+
+```yaml
+models:
+  - name: custom-model
+    use: langchain_openai:ChatOpenAI
+    base_url: $CUSTOM_BASE_URL
+    api_key: $CUSTOM_API_KEY
+    default_headers:
+      X-Custom-Header: $CUSTOM_HEADER
+```
+
+**Resolution** (handled by Pydantic config loader):
+
+```python
+import os
+
+# Before resolution (from YAML)
+config_data = {
+    "base_url": "$CUSTOM_BASE_URL",
+    "api_key": "$CUSTOM_API_KEY"
+}
+
+# After resolution (automatic)
+resolved_config = {
+    "base_url": os.getenv("CUSTOM_BASE_URL"),
+    "api_key": os.getenv("CUSTOM_API_KEY")
+}
+```
+
+**Missing Environment Variables**: Raise error at startup.
+
+## Error Handling
+
+### Missing Model
+
+```python
+model = create_chat_model(name="nonexistent")
+# ValueError: Model nonexistent not found in config
+```
+
+### Missing Provider
+
+```python
+# config.yaml
+models:
+  - name: gemini
+    use: langchain_google_genai:ChatGoogleGenerativeAI
+    # ... but langchain-google-genai not installed
+
+model = create_chat_model(name="gemini")
+# ImportError: Could not import module langchain_google_genai.
+#              Missing dependency 'google-generativeai'.
+#              Install with `uv add langchain-google-genai`, then restart.
+```
+
+**Actionable Hints** (from reflection system):
+
+```python
+MODULE_TO_PACKAGE_HINTS = {
+    "langchain_google_genai": "langchain-google-genai",
+    "langchain_anthropic": "langchain-anthropic",
+    "langchain_openai": "langchain-openai",
+    "langchain_deepseek": "langchain-deepseek"
+}
+
+def _build_missing_dependency_hint(module_path, err):
+    package = MODULE_TO_PACKAGE_HINTS.get(module_root, module_root)
+    return (
+        f"Missing dependency '{missing_module}'. "
+        f"Install with `uv add {package}` (or `pip install {package}`), "
+        "then restart DeerFlow."
+    )
+```
+
+### Thinking Not Supported
+
+```python
+# config.yaml
+models:
+  - name: gpt-3.5
+    supports_thinking: false  # Or omitted
+
+model = create_chat_model(name="gpt-3.5", thinking_enabled=True)
+# ValueError: Model gpt-3.5 does not support thinking.
+#             Set `supports_thinking: true` in config.yaml
+```
+
+## LangSmith Tracing Integration
+
+Factory automatically attaches LangSmith tracer if enabled:
+
+```python
+from src.config import is_tracing_enabled, get_tracing_config
+
+if is_tracing_enabled():
+    try:
+        from langchain_core.tracers.langchain import LangChainTracer
+        
+        tracing_config = get_tracing_config()
+        tracer = LangChainTracer(
+            project_name=tracing_config.project
+        )
+        
+        # Attach to model callbacks
+        existing_callbacks = model_instance.callbacks or []
+        model_instance.callbacks = [*existing_callbacks, tracer]
+        
+        logger.debug(
+            f"LangSmith tracing attached to model '{name}' "
+            f"(project='{tracing_config.project}')"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to attach tracing: {e}")
+```
+
+**Configuration** (`config.yaml`):
+
+```yaml
+tracing:
+  enabled: true
+  project: deerflow-production
+  # Requires LANGCHAIN_API_KEY environment variable
+```
+
+## Custom Model Providers
+
+### Adding Custom Providers
+
+1. **Install provider package**:
+   ```bash
+   uv add langchain-provider-name
+   ```
+
+2. **Add to config.yaml**:
+   ```yaml
+   models:
+     - name: my-custom-model
+       display_name: My Custom Model
+       use: langchain_provider:ChatProvider
+       model: model-id
+       api_key: $PROVIDER_API_KEY
+       temperature: 0.7
+   ```
+
+3. **Set environment variables**:
+   ```bash
+   export PROVIDER_API_KEY=your-key-here
+   ```
+
+4. **Use model**:
+   ```python
+   model = create_chat_model(name="my-custom-model")
+   ```
+
+### Patched Providers
+
+For providers needing workarounds, create patched classes:
+
+**Example**: `backend/src/models/patched_deepseek.py`
+
+```python
+from langchain_deepseek import ChatDeepSeek
+
+class PatchedChatDeepSeek(ChatDeepSeek):
+    """Patched DeepSeek client with fixes for specific issues."""
+    
+    def _generate(self, messages, **kwargs):
+        # Apply workarounds here
+        # ...
+        return super()._generate(messages, **kwargs)
+```
+
+**Usage in config**:
+
+```yaml
+models:
+  - name: deepseek-chat
+    use: src.models.patched_deepseek:PatchedChatDeepSeek
+    # ...
+```
+
+## Usage in Agent System
+
+### Lead Agent Creation
+
+```python
+def make_lead_agent(config: RunnableConfig):
+    # Extract runtime config
+    thinking_enabled = config["configurable"].get("thinking_enabled", True)
+    reasoning_effort = config["configurable"].get("reasoning_effort")
+    model_name = config["configurable"].get("model_name")
+    
+    # Resolve model (with fallback to default)
+    model_name = _resolve_model_name(model_name)
+    
+    # Create model with runtime settings
+    model = create_chat_model(
+        name=model_name,
+        thinking_enabled=thinking_enabled,
+        reasoning_effort=reasoning_effort
+    )
+    
+    # Create agent
+    return create_agent(
+        model=model,
+        tools=get_available_tools(model_name=model_name),
+        middleware=_build_middlewares(config, model_name),
+        state_schema=ThreadState
+    )
+```
+
+### Summarization Middleware
+
+```python
+def _create_summarization_middleware():
+    config = get_summarization_config()
+    
+    if config.model_name:
+        model = config.model_name  # Use specific model name
+    else:
+        # Use lightweight model for cost savings
+        model = create_chat_model(thinking_enabled=False)
+    
+    return SummarizationMiddleware(model=model, ...)
+```
+
+### Title Generation
+
+```python
+class TitleMiddleware(AgentMiddleware):
+    def _generate_title(self, state):
+        # Use lightweight model (no thinking)
+        model = create_chat_model(thinking_enabled=False)
+        
+        response = model.invoke(prompt)
+        return response.content.strip()
+```
+
+## Testing Models
+
+```python
+import pytest
+from src.models import create_chat_model
+
+def test_create_default_model():
+    model = create_chat_model()
+    assert model is not None
+    assert hasattr(model, "invoke")
+
+def test_create_with_thinking():
+    model = create_chat_model(name="gpt-4o", thinking_enabled=True)
+    # Check thinking params were applied
+    assert model.extra_body["thinking"]["type"] == "enabled"
+
+def test_vision_support():
+    from src.config import get_app_config
+    
+    config = get_app_config()
+    vision_models = [m for m in config.models if m.supports_vision]
+    
+    assert len(vision_models) > 0
+    
+    model = create_chat_model(name=vision_models[0].name)
+    # Verify ViewImageMiddleware would be added
+
+def test_missing_model_error():
+    with pytest.raises(ValueError, match="not found in config"):
+        create_chat_model(name="nonexistent-model")
+
+def test_missing_provider_hint():
+    # Temporarily remove model from sys.modules
+    import sys
+    sys.modules.pop("langchain_fake_provider", None)
+    
+    with pytest.raises(ImportError, match="Install with `uv add"):
+        create_chat_model(name="fake-model")
+```
+
+## Best Practices
+
+### 1. Model Selection
+
+```python
+# For expensive operations, use cheap model
+model = create_chat_model(name="gpt-4o-mini", thinking_enabled=False)
+
+# For complex reasoning, use flagship with thinking
+model = create_chat_model(name="gpt-4o", thinking_enabled=True)
+
+# For vision tasks, ensure model supports it
+from src.config import get_app_config
+config = get_app_config().get_model_config("gpt-4o")
+if not config.supports_vision:
+    raise ValueError("Vision required but model doesn't support it")
+```
+
+### 2. Configuration Management
+
+```yaml
+# Separate models for different use cases
+models:
+  - name: default
+    use: langchain_anthropic:ChatAnthropic
+    model: claude-3-5-sonnet-20241022
+    temperature: 0.7
+  
+  - name: cheap
+    use: langchain_openai:ChatOpenAI
+    model: gpt-4o-mini
+    temperature: 0.5
+  
+  - name: vision
+    use: langchain_openai:ChatOpenAI
+    model: gpt-4o
+    supports_vision: true
+  
+  - name: reasoning
+    use: langchain_openai:ChatOpenAI
+    model: o1-preview
+    supports_reasoning_effort: true
+```
+
+### 3. Environment Variables
+
+```bash
+# .env file
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+DEEPSEEK_API_KEY=sk-...
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+```
+
+### 4. Error Handling
+
+```python
+try:
+    model = create_chat_model(name=user_selected_model)
+except ValueError as e:
+    # Model not found
+    logger.error(f"Invalid model selection: {e}")
+    model = create_chat_model()  # Fallback to default
+except ImportError as e:
+    # Provider not installed
+    logger.error(f"Model provider missing: {e}")
+    raise  # Surface to user with install instructions
+```
+
+## See Also
+
+- [Reflection System](/advanced/reflection-system) - Dynamic class loading
+- [Middleware Chain](/advanced/middleware-chain) - How models integrate with middlewares
+- [Configuration](/configuration/models) - Model configuration reference

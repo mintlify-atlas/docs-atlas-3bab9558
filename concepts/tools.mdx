@@ -1,0 +1,403 @@
+---
+title: Tools
+description: Built-in tools, MCP integration, and community tools
+---
+
+Tools extend the agent's capabilities, enabling it to interact with external systems, execute code, and perform specialized tasks.
+
+## Tool Architecture
+
+DeerFlow's tools come from multiple sources:
+
+```
+Tools
+├── Sandbox Tools      (bash, ls, read_file, write_file, str_replace)
+├── Built-in Tools     (present_files, ask_clarification, view_image)
+├── Community Tools    (web_search, web_fetch, image_search)
+├── MCP Tools          (External tools via Model Context Protocol)
+├── Sub-agent Tool     (task - delegate to sub-agents)
+└── Custom Tools       (User-defined via config.yaml)
+```
+
+## Tool Loading
+
+Tools are assembled via `get_available_tools()`:
+
+```python
+from src.tools import get_available_tools
+
+tools = get_available_tools(
+    groups=["sandbox", "research"],  # From config.yaml
+    include_mcp=True,                # Include MCP tools
+    model_name="gpt-4",             # Current model
+    subagent_enabled=True           # Include task() tool
+)
+```
+
+**Tool Sources (in order)**:
+1. Config-defined tools (via reflection)
+2. MCP tools (from enabled servers)
+3. Built-in tools
+4. Sub-agent tool (if enabled)
+
+## Sandbox Tools
+
+Core filesystem and command execution tools:
+
+<CardGroup cols={2}>
+  <Card title="bash" icon="terminal">
+    Execute shell commands in the sandbox
+  </Card>
+  <Card title="ls" icon="list">
+    List directory contents in tree format
+  </Card>
+  <Card title="read_file" icon="file">
+    Read file contents with optional line range
+  </Card>
+  <Card title="write_file" icon="pen-to-square">
+    Write or append to files
+  </Card>
+  <Card title="str_replace" icon="replace">
+    Replace text in files
+  </Card>
+</CardGroup>
+
+<Card title="Sandbox Tools Reference" icon="box" href="/api/tools/sandbox">
+  Complete tool documentation
+</Card>
+
+## Built-in Tools
+
+Tools available to all agents:
+
+### present_files
+
+Make output files visible to the user.
+
+**Usage**:
+```python
+present_files([
+    "/mnt/user-data/outputs/report.html",
+    "/mnt/user-data/outputs/chart.png"
+])
+```
+
+**Validation**:
+- Only files in `/mnt/user-data/outputs` can be presented
+- Files must exist
+- Returns artifact metadata for frontend display
+
+### ask_clarification
+
+Request clarification from the user (interrupts execution).
+
+**Usage**:
+```python
+ask_clarification(
+    question="Which data format would you like: CSV or JSON?"
+)
+```
+
+**Behavior**:
+- Interrupts agent execution
+- Returns control to user
+- User response appended to conversation
+
+### view_image
+
+Load image as base64 for vision-enabled models.
+
+**Usage**:
+```python
+view_image(
+    path="/mnt/user-data/uploads/screenshot.png",
+    description="Screenshot of the error"
+)
+```
+
+**Requirements**:
+- Model must have `supports_vision: true`
+- Image formats: PNG, JPEG, GIF, WebP
+
+<Card title="Built-in Tools Reference" icon="wrench" href="/api/tools/built-in">
+  Detailed tool documentation
+</Card>
+
+## Community Tools
+
+Pre-integrated external service tools:
+
+### web_search (Tavily)
+
+Search the web for current information.
+
+**Configuration**:
+```yaml
+tools:
+  - use: src.community.tavily:web_search
+    group: research
+```
+
+**Usage**:
+```python
+results = web_search(
+    query="Latest AI research papers 2026",
+    max_results=5
+)
+```
+
+**Requires**: `TAVILY_API_KEY` environment variable
+
+### web_fetch
+
+Fetch and extract content from web pages.
+
+**Providers**: Tavily, Jina AI, Firecrawl
+
+**Configuration**:
+```yaml
+tools:
+  - use: src.community.tavily:web_fetch
+    group: research
+  # Or
+  - use: src.community.jina_ai:web_fetch
+    group: research
+  # Or
+  - use: src.community.firecrawl:web_fetch
+    group: research
+```
+
+**Usage**:
+```python
+content = web_fetch(
+    url="https://example.com/article"
+)
+```
+
+### image_search (DuckDuckGo)
+
+Search for images.
+
+**Configuration**:
+```yaml
+tools:
+  - use: src.community.image_search:image_search
+    group: media
+```
+
+**Usage**:
+```python
+images = image_search(
+    query="mountain landscape",
+    max_results=10
+)
+```
+
+<Card title="Community Tools Reference" icon="users" href="/api/tools/community">
+  All community tools
+</Card>
+
+## MCP Tools
+
+Model Context Protocol (MCP) enables integration with external tools and services.
+
+**Configuration** (`extensions_config.json`):
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "enabled": true,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/directory"]
+    }
+  }
+}
+```
+
+**Features**:
+- **stdio transport**: Command-based servers
+- **HTTP/SSE transport**: Web-based servers
+- **OAuth support**: Automatic token management
+- **Lazy loading**: Tools loaded on first use
+- **Cache invalidation**: Detects config changes
+
+<Card title="MCP Integration Guide" icon="plug" href="/guides/mcp-servers">
+  Set up MCP servers
+</Card>
+
+## Sub-agent Tool
+
+Delegate complex tasks to sub-agents.
+
+**Configuration**:
+```yaml
+subagents:
+  enabled: true
+```
+
+**Usage**:
+```python
+task(
+    description="Research AI frameworks",
+    prompt="Research TensorFlow, PyTorch, and JAX",
+    subagent_type="general-purpose",
+    max_turns=20
+)
+```
+
+**Features**:
+- Up to 3 concurrent sub-agents
+- Isolated contexts
+- Shared filesystem
+- 15-minute timeout
+
+<Card title="Sub-agents" icon="users" href="/concepts/sub-agents">
+  Learn about task delegation
+</Card>
+
+## Custom Tools
+
+Add your own tools via `config.yaml`:
+
+```yaml
+tools:
+  - use: my_tools.custom:my_tool
+    group: custom
+```
+
+**Tool Function**:
+```python my_tools/custom.py
+from langchain_core.tools import tool
+
+@tool
+def my_tool(param: str) -> str:
+    """Tool description for the agent.
+    
+    Args:
+        param: Parameter description
+    
+    Returns:
+        Result description
+    """
+    # Tool implementation
+    return f"Result: {param}"
+```
+
+**Reflection System**:
+- `use: module.path:variable_name` resolved via `resolve_variable()`
+- Validates against LangChain tool interface
+- Supports any callable that returns a LangChain tool
+
+<Card title="Creating Custom Tools" icon="code" href="/guides/custom-tools">
+  Build your own tools
+</Card>
+
+## Tool Groups
+
+Organize tools into logical groups:
+
+```yaml
+tool_groups:
+  - name: sandbox
+    description: Filesystem and command execution
+  
+  - name: research
+    description: Web search and content fetching
+  
+  - name: media
+    description: Image search and generation
+  
+  - name: custom
+    description: User-defined tools
+
+tools:
+  - use: src.community.tavily:web_search
+    group: research
+  
+  - use: src.community.image_search:image_search
+    group: media
+```
+
+**Usage**:
+```python
+# Load specific groups
+tools = get_available_tools(groups=["sandbox", "research"])
+
+# Load all groups
+tools = get_available_tools(groups=["*"])
+```
+
+## Tool Calling Flow
+
+1. **Agent Decision**: Agent decides to use a tool
+2. **Tool Call Message**: AIMessage with `tool_calls`
+3. **Tool Execution**: Tool function invoked
+4. **Tool Message**: ToolMessage with result
+5. **Agent Processing**: Agent processes result
+
+**Example**:
+```
+Agent: "I need to read the data file"
+  → AIMessage(tool_calls=[{"name": "read_file", "args": {"path": "data.csv"}}])
+
+System: Execute read_file("/mnt/user-data/uploads/data.csv")
+  → ToolMessage(content="col1,col2\n1,2\n3,4")
+
+Agent: "The data has 2 rows and 2 columns..."
+```
+
+## Error Handling
+
+Tools should handle errors gracefully:
+
+```python
+@tool
+def my_tool(param: str) -> str:
+    """My tool description."""
+    try:
+        result = do_something(param)
+        return result
+    except FileNotFoundError:
+        return f"Error: File '{param}' not found"
+    except Exception as e:
+        return f"Error: {str(e)}"
+```
+
+**Best Practices**:
+- Return error messages as strings (not raise exceptions)
+- Include context in error messages
+- Suggest fixes when possible
+
+## Tool Permissions
+
+Skills can restrict tool usage:
+
+```yaml SKILL.md frontmatter
+---
+name: my-skill
+allowed-tools:
+  - bash
+  - read_file
+  - write_file
+---
+```
+
+When this skill is loaded, only the specified tools are available.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Sandbox Tools" icon="box" href="/api/tools/sandbox">
+    Filesystem and command tools
+  </Card>
+  <Card title="Built-in Tools" icon="wrench" href="/api/tools/built-in">
+    Core agent tools
+  </Card>
+  <Card title="MCP Integration" icon="plug" href="/guides/mcp-servers">
+    Connect external tools
+  </Card>
+  <Card title="Custom Tools" icon="code" href="/guides/custom-tools">
+    Create your own tools
+  </Card>
+</CardGroup>

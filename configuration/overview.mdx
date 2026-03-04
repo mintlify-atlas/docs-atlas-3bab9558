@@ -1,0 +1,242 @@
+---
+title: Configuration Overview
+description: Understanding DeerFlow's configuration system, file locations, and priority order
+---
+
+DeerFlow uses a dual-configuration approach with YAML for core settings and JSON for extensions. The configuration system supports environment variable resolution, flexible file locations, and hot reloading.
+
+## Configuration Files
+
+DeerFlow uses two main configuration files:
+
+<CardGroup cols={2}>
+  <Card title="config.yaml" icon="gear">
+    Core application settings including models, tools, sandbox, and system behavior
+  </Card>
+  <Card title="extensions_config.json" icon="puzzle-piece">
+    Extensions configuration for MCP servers and skills enable/disable states
+  </Card>
+</CardGroup>
+
+## File Locations
+
+### Main Configuration (config.yaml)
+
+DeerFlow resolves `config.yaml` in the following priority order:
+
+<Steps>
+  <Step title="Explicit Path Parameter">
+    If you pass a `config_path` argument when loading configuration programmatically
+  </Step>
+  
+  <Step title="DEER_FLOW_CONFIG_PATH Environment Variable">
+    Set this variable to specify a custom config location:
+    ```bash
+    export DEER_FLOW_CONFIG_PATH=/path/to/custom/config.yaml
+    ```
+  </Step>
+  
+  <Step title="Current Working Directory">
+    Checks for `config.yaml` in the directory where DeerFlow is run
+  </Step>
+  
+  <Step title="Parent Directory Fallback">
+    If not found in CWD, checks the parent directory
+  </Step>
+</Steps>
+
+<Warning>
+  If no `config.yaml` file is found, DeerFlow will raise a `FileNotFoundError`
+</Warning>
+
+### Extensions Configuration (extensions_config.json)
+
+Extensions configuration follows a similar priority order:
+
+<Steps>
+  <Step title="DEER_FLOW_EXTENSIONS_CONFIG_PATH Environment Variable">
+    ```bash
+    export DEER_FLOW_EXTENSIONS_CONFIG_PATH=/path/to/extensions_config.json
+    ```
+  </Step>
+  
+  <Step title="Current Working Directory">
+    Checks for `extensions_config.json` in CWD
+  </Step>
+  
+  <Step title="Parent Directory">
+    Falls back to parent directory if not found
+  </Step>
+  
+  <Step title="Backward Compatibility">
+    Also checks for legacy `mcp_config.json` filename
+  </Step>
+</Steps>
+
+<Info>
+  Extensions configuration is **optional**. If no file is found, DeerFlow continues with an empty extensions config
+</Info>
+
+### Data Directory (DEER_FLOW_HOME)
+
+DeerFlow stores persistent data (memory, threads, agent configurations) in a base directory resolved in this order:
+
+<Steps>
+  <Step title="DEER_FLOW_HOME Environment Variable">
+    ```bash
+    export DEER_FLOW_HOME=/custom/data/directory
+    ```
+  </Step>
+  
+  <Step title="Local Development Detection">
+    If running from the `backend/` directory, uses `.deer-flow/` in that directory
+  </Step>
+  
+  <Step title="Default User Home">
+    Falls back to `~/.deer-flow/`
+  </Step>
+</Steps>
+
+## Directory Structure
+
+The data directory (`DEER_FLOW_HOME`) has the following structure:
+
+```
+{DEER_FLOW_HOME}/
+├── memory.json              # Global memory storage
+├── USER.md                  # Global user profile (injected into agents)
+├── agents/                  # Custom agent configurations
+│   └── {agent_name}/
+│       ├── config.yaml      # Agent-specific config
+│       ├── SOUL.md          # Agent personality/identity
+│       └── memory.json      # Agent-specific memory
+└── threads/                 # Per-thread working directories
+    └── {thread_id}/
+        └── user-data/       # Mounted as /mnt/user-data/ in sandbox
+            ├── workspace/   # Agent's working directory
+            ├── uploads/     # User-uploaded files
+            └── outputs/     # Agent-generated artifacts
+```
+
+## Environment Variable Resolution
+
+Both configuration files support environment variable resolution using the `$VAR_NAME` syntax:
+
+```yaml config.yaml
+models:
+  - name: gpt-4
+    use: langchain_openai:ChatOpenAI
+    model: gpt-4
+    api_key: $OPENAI_API_KEY  # Resolved from environment
+    max_tokens: 4096
+```
+
+```json extensions_config.json
+{
+  "mcpServers": {
+    "github": {
+      "enabled": true,
+      "type": "stdio",
+      "command": "npx",
+      "env": {
+        "GITHUB_TOKEN": "$GITHUB_TOKEN"  // Resolved from environment
+      }
+    }
+  }
+}
+```
+
+<Warning>
+  If a referenced environment variable is not set, DeerFlow will raise a `ValueError` during configuration loading
+</Warning>
+
+## Configuration Loading
+
+Configuration is loaded once at startup and cached as a singleton:
+
+```python
+from src.config.app_config import get_app_config
+
+# Get cached config (loads on first call)
+config = get_app_config()
+
+# Access configuration
+model = config.get_model_config("gpt-4")
+tool = config.get_tool_config("web_search")
+```
+
+### Hot Reloading
+
+You can reload configuration without restarting the application:
+
+```python
+from src.config.app_config import reload_app_config
+from src.config.extensions_config import reload_extensions_config
+
+# Reload main config
+config = reload_app_config()
+
+# Reload extensions config
+extensions = reload_extensions_config()
+```
+
+<Info>
+  Hot reloading is useful during development or when updating API keys without downtime
+</Info>
+
+## Configuration Validation
+
+DeerFlow uses [Pydantic](https://docs.pydantic.dev/) for configuration validation. Invalid configurations will raise detailed validation errors at startup:
+
+```bash
+pydantic_core._pydantic_core.ValidationError: 2 validation errors for AppConfig
+models.0.name
+  Field required [type=missing, input_value={'use': 'langchain_openai..., 'max_tokens': 4096}, input_type=dict]
+models.0.model
+  Field required [type=missing, input_value={'use': 'langchain_openai..., 'max_tokens': 4096}, input_type=dict]
+```
+
+## Getting Started
+
+<Steps>
+  <Step title="Copy Example Configuration">
+    ```bash
+    cp config.example.yaml config.yaml
+    cp extensions_config.example.json extensions_config.json
+    ```
+  </Step>
+  
+  <Step title="Set Environment Variables">
+    Create a `.env` file or export variables:
+    ```bash
+    export OPENAI_API_KEY="sk-..."
+    export ANTHROPIC_API_KEY="sk-ant-..."
+    export GITHUB_TOKEN="ghp_..."
+    ```
+  </Step>
+  
+  <Step title="Customize Configuration">
+    Edit `config.yaml` to configure models, tools, and sandbox settings
+  </Step>
+  
+  <Step title="Enable Extensions">
+    Edit `extensions_config.json` to enable/disable MCP servers and skills
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Models Configuration" icon="brain" href="/configuration/models">
+    Configure LLM models and providers
+  </Card>
+  <Card title="Sandbox Modes" icon="box" href="/configuration/sandbox-modes">
+    Set up local, Docker, or Kubernetes sandboxes
+  </Card>
+  <Card title="Skills & MCP" icon="puzzle-piece" href="/configuration/skills-and-mcp">
+    Configure skills and MCP servers
+  </Card>
+  <Card title="Memory Configuration" icon="database" href="/configuration/memory">
+    Set up the memory system
+  </Card>
+</CardGroup>

@@ -1,0 +1,433 @@
+---
+title: Memory
+description: Long-term memory with fact extraction and context management
+---
+
+DeerFlow's memory system provides persistent, long-term memory across conversations, learning about you and adapting over time.
+
+## Overview
+
+Most agents forget everything when a conversation ends. DeerFlow remembers:
+
+- **User Context**: Your work, preferences, and habits
+- **Conversation History**: Recent and historical interactions
+- **Extracted Facts**: Discrete facts with confidence scores
+
+**Storage**: `backend/.deer-flow/memory.json`
+
+<Info>
+  Memory is stored locally and stays under your control. No data is sent to external services.
+</Info>
+
+## Memory Structure
+
+Memory is organized into three main sections:
+
+### User Context
+
+**Current state and preferences**:
+
+```json
+{
+  "userContext": {
+    "workContext": "Software engineer at TechCorp working on microservices",
+    "personalContext": "Interested in AI/ML, prefers Python over JavaScript",
+    "topOfMind": "Currently building a new API gateway service"
+  }
+}
+```
+
+### History
+
+**Temporal context organization**:
+
+```json
+{
+  "history": {
+    "recentMonths": "Worked on authentication system (Jan-Feb 2026)",
+    "earlierContext": "Led migration to Kubernetes (Q4 2025)",
+    "longTermBackground": "Joined TechCorp in 2023, previously at StartupXYZ"
+  }
+}
+```
+
+### Facts
+
+**Discrete, scored knowledge**:
+
+```json
+{
+  "facts": [
+    {
+      "id": "fact-1",
+      "content": "Uses VS Code as primary editor",
+      "category": "preference",
+      "confidence": 0.9,
+      "createdAt": "2026-03-01T10:00:00Z",
+      "source": "thread-abc123"
+    },
+    {
+      "id": "fact-2",
+      "content": "Prefers test-driven development",
+      "category": "behavior",
+      "confidence": 0.85,
+      "createdAt": "2026-03-02T14:30:00Z",
+      "source": "thread-xyz789"
+    }
+  ]
+}
+```
+
+## How Memory Works
+
+### 1. Conversation Capture
+
+**MemoryMiddleware** filters relevant messages:
+
+```python
+class MemoryMiddleware:
+    async def after_agent(self, state: ThreadState):
+        # Filter to user inputs and final AI responses
+        relevant_messages = [
+            msg for msg in state["messages"]
+            if isinstance(msg, (HumanMessage, AIMessage))
+            and not msg.tool_calls  # Exclude tool-calling messages
+        ]
+        
+        # Queue for memory update
+        memory_queue.add(state["thread_id"], relevant_messages)
+```
+
+### 2. Debounced Updates
+
+Memory updates are debounced to batch changes:
+
+```python
+class MemoryQueue:
+    def __init__(self, debounce_seconds=30):
+        self.debounce_seconds = debounce_seconds
+        self.queue = {}
+    
+    def add(self, thread_id, messages):
+        # Add to queue
+        self.queue[thread_id] = messages
+        
+        # Wait for debounce period
+        await asyncio.sleep(self.debounce_seconds)
+        
+        # Process update
+        await self.process_update(thread_id)
+```
+
+**Default**: 30 seconds after conversation ends
+
+### 3. Fact Extraction
+
+An LLM extracts facts from the conversation:
+
+```python
+async def extract_facts(messages: list) -> list[dict]:
+    prompt = f"""
+    Extract key facts from this conversation.
+    
+    For each fact, provide:
+    - content: The fact itself
+    - category: preference|knowledge|context|behavior|goal
+    - confidence: 0.0-1.0 (how certain are you?)
+    
+    Conversation:
+    {messages}
+    """
+    
+    response = await llm.ainvoke(prompt)
+    return parse_facts(response)
+```
+
+**Confidence Scoring**:
+- **0.9-1.0**: Explicit statements ("I prefer X")
+- **0.7-0.9**: Strong inference ("I always use X")
+- **0.5-0.7**: Weak inference ("I might use X")
+- **Below 0.5**: Discarded
+
+### 4. Memory Storage
+
+Facts are merged with existing memory:
+
+```python
+async def update_memory(new_facts: list):
+    # Load existing memory
+    memory = load_memory()
+    
+    # Merge new facts (deduplicate by content similarity)
+    memory["facts"] = merge_facts(memory["facts"], new_facts)
+    
+    # Prune if exceeding max_facts
+    if len(memory["facts"]) > config.max_facts:
+        memory["facts"] = prune_facts(memory["facts"], config.max_facts)
+    
+    # Atomic write (temp file + rename)
+    save_memory(memory)
+```
+
+### 5. Context Injection
+
+On the next conversation, memory is injected into the system prompt:
+
+```python
+def apply_prompt_template(config: RunnableConfig) -> str:
+    memory = load_memory()
+    
+    # Select top facts by confidence
+    top_facts = sorted(
+        memory["facts"],
+        key=lambda f: f["confidence"],
+        reverse=True
+    )[:15]
+    
+    prompt = f"""
+    <memory>
+    User Context:
+    - {memory["userContext"]["workContext"]}
+    - {memory["userContext"]["personalContext"]}
+    
+    Key Facts:
+    {"\n".join(f"- {fact['content']} (confidence: {fact['confidence']})" for fact in top_facts)}
+    </memory>
+    """
+    
+    return prompt
+```
+
+## Configuration
+
+Memory is configured in `config.yaml`:
+
+```yaml
+memory:
+  enabled: true                          # Master switch
+  storage_path: .deer-flow/memory.json  # Relative to backend/
+  debounce_seconds: 30                  # Wait before processing
+  model_name: null                       # LLM for extraction (null = default)
+  max_facts: 100                        # Maximum facts to store
+  fact_confidence_threshold: 0.7        # Minimum confidence to store
+  injection_enabled: true               # Inject into prompts
+  max_injection_tokens: 2000            # Token limit for injection
+```
+
+<Card title="Memory Configuration" icon="gear" href="/configuration/memory">
+  Detailed configuration options
+</Card>
+
+## Fact Categories
+
+Facts are categorized for organization:
+
+<AccordionGroup>
+  <Accordion title="preference">
+    User preferences and likes/dislikes.
+    
+    **Examples**:
+    - "Prefers Python over JavaScript"
+    - "Uses VS Code as primary editor"
+    - "Likes dark themes"
+  </Accordion>
+  
+  <Accordion title="knowledge">
+    User's expertise and knowledge areas.
+    
+    **Examples**:
+    - "Expert in distributed systems"
+    - "Familiar with Kubernetes"
+    - "Knows React and Next.js"
+  </Accordion>
+  
+  <Accordion title="context">
+    Current situation and environment.
+    
+    **Examples**:
+    - "Works at TechCorp as senior engineer"
+    - "Based in San Francisco"
+    - "Team size is 8 engineers"
+  </Accordion>
+  
+  <Accordion title="behavior">
+    How the user works and makes decisions.
+    
+    **Examples**:
+    - "Prefers test-driven development"
+    - "Always writes documentation first"
+    - "Uses git rebase instead of merge"
+  </Accordion>
+  
+  <Accordion title="goal">
+    User's objectives and aspirations.
+    
+    **Examples**:
+    - "Learning Rust for systems programming"
+    - "Building a SaaS product"
+    - "Planning to migrate to microservices"
+  </Accordion>
+</AccordionGroup>
+
+## Memory API
+
+Manage memory via the Gateway API:
+
+### Get Memory
+
+```bash
+curl http://localhost:8001/api/memory
+```
+
+### Reload Memory
+
+```bash
+curl -X POST http://localhost:8001/api/memory/reload
+```
+
+### Get Configuration
+
+```bash
+curl http://localhost:8001/api/memory/config
+```
+
+<Card title="Memory API Reference" icon="server" href="/api/gateway/memory">
+  Complete API documentation
+</Card>
+
+## Python Client
+
+Access memory programmatically:
+
+```python
+from src.client import DeerFlowClient
+
+client = DeerFlowClient()
+
+# Get memory data
+memory = client.get_memory()
+print(memory["userContext"])
+print(memory["facts"])
+
+# Reload from disk
+client.reload_memory()
+
+# Get configuration
+config = client.get_memory_config()
+print(config["max_facts"])
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Provide explicit information">
+    The more explicit you are, the higher the confidence:
+    
+    ✅ **Good**: "I prefer Python because it's more readable"
+    
+    ❌ **Bad**: "I guess Python is okay"
+  </Accordion>
+  
+  <Accordion title="Correct inaccuracies">
+    If the agent has wrong information, correct it:
+    
+    "Actually, I don't use VS Code anymore. I switched to Neovim last month."
+    
+    The system will update or replace the fact.
+  </Accordion>
+  
+  <Accordion title="Review memory periodically">
+    Check memory data for accuracy:
+    
+    ```bash
+    curl http://localhost:8001/api/memory | jq '.facts'
+    ```
+    
+    Manually edit `backend/.deer-flow/memory.json` if needed.
+  </Accordion>
+  
+  <Accordion title="Adjust confidence threshold">
+    If you get too many low-quality facts:
+    
+    ```yaml
+    memory:
+      fact_confidence_threshold: 0.8  # Raise threshold
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Memory Privacy
+
+Memory is **completely private**:
+
+- Stored locally in `backend/.deer-flow/memory.json`
+- Never sent to external services
+- Only used for prompt injection in your own agent
+- Fully under your control
+
+**To delete memory**:
+```bash
+rm backend/.deer-flow/memory.json
+```
+
+The system will create a new, empty memory file.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Memory not persisting">
+    Check that memory is enabled:
+    
+    ```yaml
+    memory:
+      enabled: true
+    ```
+    
+    Verify the storage path exists:
+    
+    ```bash
+    ls backend/.deer-flow/memory.json
+    ```
+  </Accordion>
+  
+  <Accordion title="Too many low-quality facts">
+    Raise the confidence threshold:
+    
+    ```yaml
+    memory:
+      fact_confidence_threshold: 0.8
+    ```
+  </Accordion>
+  
+  <Accordion title="Memory not appearing in prompts">
+    Check injection is enabled:
+    
+    ```yaml
+    memory:
+      injection_enabled: true
+    ```
+    
+    Verify facts exist:
+    
+    ```bash
+    curl http://localhost:8001/api/memory | jq '.facts | length'
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Memory Configuration" icon="gear" href="/configuration/memory">
+    Configure memory system
+  </Card>
+  <Card title="Memory API" icon="server" href="/api/gateway/memory">
+    API reference
+  </Card>
+  <Card title="Context Engineering" icon="brain" href="/advanced/context-engineering">
+    How memory injection works
+  </Card>
+  <Card title="Agent System" icon="robot" href="/concepts/agent-system">
+    Learn about the agent
+  </Card>
+</CardGroup>

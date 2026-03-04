@@ -1,0 +1,466 @@
+---
+title: Community Tools
+description: Third-party integrations for web search, content fetching, and image search
+---
+
+## Overview
+
+Community tools provide integrations with external services for enhanced agent capabilities. These tools require API keys and configuration through DeerFlow's tool configuration system.
+
+<Note>
+Community tools may require additional setup and API keys. Check the configuration requirements for each tool before use.
+</Note>
+
+---
+
+## web_search (Tavily)
+
+Search the web using the Tavily search API.
+
+### Configuration
+
+```yaml
+tools:
+  web_search:
+    provider: tavily
+    api_key: your-tavily-api-key
+    max_results: 5
+```
+
+### Parameters
+
+<ParamField path="query" type="str" required>
+  The query to search for.
+</ParamField>
+
+### Example
+
+```python
+# Search for recent information
+result = web_search(
+    query="latest developments in AI language models 2024"
+)
+```
+
+### Return Type
+
+Returns a JSON string with normalized search results:
+
+```json
+[
+  {
+    "title": "Article Title",
+    "url": "https://example.com/article",
+    "snippet": "Article description or excerpt..."
+  }
+]
+```
+
+---
+
+## web_fetch
+
+Fetch the contents of a web page at a given URL. Multiple providers are available.
+
+### Providers
+
+#### Tavily
+
+Uses Tavily's content extraction API.
+
+**Configuration:**
+```yaml
+tools:
+  web_search:
+    provider: tavily
+    api_key: your-tavily-api-key
+```
+
+**Example:**
+```python
+web_fetch(url="https://example.com/article")
+```
+
+**Returns:**
+```
+# Article Title
+
+[Article content, truncated to 4096 characters]
+```
+
+#### Firecrawl
+
+Uses Firecrawl for advanced web scraping with JavaScript rendering.
+
+**Configuration:**
+```yaml
+tools:
+  web_search:
+    provider: firecrawl
+    api_key: your-firecrawl-api-key
+```
+
+**Example:**
+```python
+web_fetch(url="https://example.com/dynamic-page")
+```
+
+**Returns:**
+Markdown-formatted content with title
+
+#### Jina AI
+
+Uses Jina AI's reader API with readability extraction.
+
+**Configuration:**
+```yaml
+tools:
+  web_fetch:
+    timeout: 10
+```
+
+**Example:**
+```python
+web_fetch(url="https://example.com/article")
+```
+
+**Returns:**
+Markdown-formatted article content (up to 4096 characters)
+
+### Parameters
+
+<ParamField path="url" type="str" required>
+  The URL to fetch the contents of.
+</ParamField>
+
+### Important Notes
+
+- Only fetch **EXACT URLs** provided by the user or returned from search results
+- Cannot access content requiring authentication (private Google Docs, login walls)
+- **Do NOT** add `www.` to URLs that don't have them
+- URLs must include the schema: `https://example.com` is valid, `example.com` is invalid
+
+### Examples
+
+```python
+# Good: Exact URL from search results
+web_fetch(url="https://blog.example.com/article")
+
+# Good: User-provided URL
+web_fetch(url="https://docs.python.org/3/library/os.html")
+
+# Bad: Missing schema
+web_fetch(url="example.com")  # ERROR: Invalid URL
+
+# Bad: Adding www unnecessarily
+web_fetch(url="https://www.example.com")  # If original was https://example.com
+```
+
+### Error Handling
+
+All providers return error messages as strings:
+
+```
+Error: [error description]
+```
+
+---
+
+## web_search (Firecrawl)
+
+Search the web using Firecrawl's search API.
+
+### Configuration
+
+```yaml
+tools:
+  web_search:
+    provider: firecrawl
+    api_key: your-firecrawl-api-key
+    max_results: 5
+```
+
+### Parameters
+
+<ParamField path="query" type="str" required>
+  The query to search for.
+</ParamField>
+
+### Example
+
+```python
+result = web_search(
+    query="machine learning best practices"
+)
+```
+
+### Return Type
+
+Returns a JSON string with normalized search results:
+
+```json
+[
+  {
+    "title": "Article Title",
+    "url": "https://example.com/article",
+    "snippet": "Article description..."
+  }
+]
+```
+
+---
+
+## image_search
+
+Search for images online using DuckDuckGo. Use this tool **BEFORE** image generation to find reference images.
+
+### Configuration
+
+```yaml
+tools:
+  image_search:
+    max_results: 5
+```
+
+### Parameters
+
+<ParamField path="query" type="str" required>
+  Search keywords describing the images you want to find. Be specific for better results.
+</ParamField>
+
+<ParamField path="max_results" type="int" optional>
+  Maximum number of images to return. Default is 5.
+</ParamField>
+
+<ParamField path="size" type="str" optional>
+  Image size filter. Options: `"Small"`, `"Medium"`, `"Large"`, `"Wallpaper"`. Use `"Large"` for reference images.
+</ParamField>
+
+<ParamField path="type_image" type="str" optional>
+  Image type filter. Options: `"photo"`, `"clipart"`, `"gif"`, `"transparent"`, `"line"`. Use `"photo"` for realistic references.
+</ParamField>
+
+<ParamField path="layout" type="str" optional>
+  Layout filter. Options: `"Square"`, `"Tall"`, `"Wide"`. Choose based on your generation needs.
+</ParamField>
+
+### When to Use
+
+- **Before generating character/portrait images**: Search for similar poses, expressions, styles
+- **Before generating specific objects/products**: Search for accurate visual references
+- **Before generating scenes/locations**: Search for architectural or environmental references
+- **Before generating fashion/clothing**: Search for style and detail references
+
+### Examples
+
+```python
+# Good: Specific query for portrait reference
+image_search(
+    query="Japanese woman street photography 1990s",
+    type_image="photo",
+    size="Large"
+)
+
+# Good: Product reference
+image_search(
+    query="modern minimalist desk lamp metal",
+    type_image="photo",
+    layout="Square"
+)
+
+# Bad: Too vague
+image_search(query="woman")  # Not specific enough
+```
+
+### Return Type
+
+Returns a JSON string with search results:
+
+```json
+{
+  "query": "Japanese woman street photography 1990s",
+  "total_results": 5,
+  "results": [
+    {
+      "title": "Image title",
+      "image_url": "https://example.com/image.jpg",
+      "thumbnail_url": "https://example.com/thumb.jpg"
+    }
+  ],
+  "usage_hint": "Use the 'image_url' values as reference images in image generation. Download them first if needed."
+}
+```
+
+### Using Results
+
+The returned image URLs can be used as reference images in image generation tools:
+
+```python
+# 1. Search for reference images
+results = image_search(
+    query="vintage camera Leica M3",
+    type_image="photo",
+    size="Large"
+)
+
+# 2. Parse results (in practice, this would be done by the agent)
+import json
+data = json.loads(results)
+reference_url = data["results"][0]["image_url"]
+
+# 3. Use in image generation (pseudocode)
+generate_image(
+    prompt="A vintage Leica M3 camera on a wooden desk",
+    reference_images=[reference_url]
+)
+```
+
+---
+
+## Configuration Examples
+
+### Using Tavily for Search
+
+```yaml
+tools:
+  web_search:
+    provider: tavily
+    api_key: tvly-xxxxxxxxxxxxx
+    max_results: 10
+```
+
+### Using Firecrawl for Search
+
+```yaml
+tools:
+  web_search:
+    provider: firecrawl
+    api_key: fc-xxxxxxxxxxxxx
+    max_results: 5
+```
+
+### Using Jina AI for Fetching
+
+```yaml
+tools:
+  web_fetch:
+    timeout: 15
+```
+
+### Image Search
+
+```yaml
+tools:
+  image_search:
+    max_results: 10
+```
+
+---
+
+## Best Practices
+
+### Web Search
+
+- Use specific, targeted queries
+- Search before fetching to find relevant URLs
+- Respect `max_results` configuration
+
+```python
+# Good: Specific query
+web_search(query="Python asyncio best practices 2024")
+
+# Bad: Too broad
+web_search(query="programming")
+```
+
+### Web Fetch
+
+- Only fetch URLs from search results or user input
+- Never modify URLs (especially don't add/remove `www.`)
+- Always include URL schema (`https://`)
+- Handle authentication limitations gracefully
+
+```python
+# Good: Exact URL
+web_fetch(url="https://docs.python.org/3/library/asyncio.html")
+
+# Bad: Modified URL
+web_fetch(url="https://www.docs.python.org/3/library/asyncio.html")
+```
+
+### Image Search
+
+- Be specific in search queries
+- Use appropriate filters for your use case
+- Always search **before** generating images
+- Use `"photo"` type for realistic references
+- Use `"Large"` size for best quality references
+
+```python
+# Good: Specific query with filters
+image_search(
+    query="Victorian era portrait photography woman formal dress",
+    type_image="photo",
+    size="Large",
+    layout="Tall"
+)
+
+# Bad: Vague query
+image_search(query="photo")
+```
+
+---
+
+## Error Handling
+
+All community tools handle errors gracefully:
+
+### Search Errors
+
+```python
+result = web_search(query="test")
+# If error occurs:
+# "Error: [error description]"
+```
+
+### Fetch Errors
+
+```python
+result = web_fetch(url="https://invalid-url.com")
+# Returns:
+# "Error: [error description]"
+```
+
+### Image Search Errors
+
+```python
+result = image_search(query="test")
+# If no results:
+# {"error": "No images found", "query": "test"}
+```
+
+---
+
+## Dependencies
+
+### Tavily
+
+```bash
+pip install tavily-python
+```
+
+### Firecrawl
+
+```bash
+pip install firecrawl-py
+```
+
+### Jina AI
+
+Requires custom client implementation (included in DeerFlow).
+
+### Image Search
+
+```bash
+pip install ddgs
+```

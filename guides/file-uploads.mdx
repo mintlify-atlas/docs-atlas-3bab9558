@@ -1,0 +1,573 @@
+---
+title: File Uploads
+description: Upload and process files in DeerFlow conversations
+---
+
+## Overview
+
+DeerFlow provides complete file upload functionality with automatic document conversion and thread isolation. Users can upload files during conversations, and the agent automatically accesses and processes them.
+
+### Features
+
+<CardGroup cols={2}>
+  <Card title="Multi-file Upload" icon="files">
+    Upload multiple files simultaneously
+  </Card>
+  
+  <Card title="Auto Conversion" icon="file-arrow-down">
+    Automatic PDF and Office document to Markdown conversion
+  </Card>
+  
+  <Card title="Thread Isolation" icon="lock">
+    Files stored in thread-specific directories
+  </Card>
+  
+  <Card title="Agent Awareness" icon="robot">
+    Agent automatically sees uploaded files
+  </Card>
+</CardGroup>
+
+## Supported File Formats
+
+These formats are automatically converted to Markdown:
+
+- **PDF**: `.pdf`
+- **PowerPoint**: `.ppt`, `.pptx`
+- **Excel**: `.xls`, `.xlsx`
+- **Word**: `.doc`, `.docx`
+
+Other file types are stored as-is and can be accessed by the agent.
+
+## API Endpoints
+
+### Upload Files
+
+```http
+POST /api/threads/{thread_id}/uploads
+Content-Type: multipart/form-data
+```
+
+**Request:**
+- `files`: One or more files
+
+**Response:**
+```json
+{
+  "success": true,
+  "files": [
+    {
+      "filename": "document.pdf",
+      "size": 1234567,
+      "path": ".deer-flow/threads/{thread_id}/user-data/uploads/document.pdf",
+      "virtual_path": "/mnt/user-data/uploads/document.pdf",
+      "artifact_url": "/api/threads/{thread_id}/artifacts/mnt/user-data/uploads/document.pdf",
+      "markdown_file": "document.md",
+      "markdown_path": ".deer-flow/threads/{thread_id}/user-data/uploads/document.md",
+      "markdown_virtual_path": "/mnt/user-data/uploads/document.md",
+      "markdown_artifact_url": "/api/threads/{thread_id}/artifacts/mnt/user-data/uploads/document.md"
+    }
+  ],
+  "message": "Successfully uploaded 1 file(s)"
+}
+```
+
+### List Files
+
+```http
+GET /api/threads/{thread_id}/uploads/list
+```
+
+**Response:**
+```json
+{
+  "files": [
+    {
+      "filename": "document.pdf",
+      "size": 1234567,
+      "path": ".deer-flow/threads/{thread_id}/user-data/uploads/document.pdf",
+      "virtual_path": "/mnt/user-data/uploads/document.pdf",
+      "artifact_url": "/api/threads/{thread_id}/artifacts/mnt/user-data/uploads/document.pdf",
+      "extension": ".pdf",
+      "modified": 1705997600.0
+    }
+  ],
+  "count": 1
+}
+```
+
+### Delete File
+
+```http
+DELETE /api/threads/{thread_id}/uploads/{filename}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Deleted document.pdf"
+}
+```
+
+## Using the Upload API
+
+<Tabs>
+  <Tab title="curl">
+    ```bash
+    # Upload single file
+    curl -X POST http://localhost:2026/api/threads/my-thread/uploads \
+      -F "files=@/path/to/document.pdf"
+    
+    # Upload multiple files
+    curl -X POST http://localhost:2026/api/threads/my-thread/uploads \
+      -F "files=@document.pdf" \
+      -F "files=@presentation.pptx" \
+      -F "files=@spreadsheet.xlsx"
+    
+    # List uploaded files
+    curl http://localhost:2026/api/threads/my-thread/uploads/list
+    
+    # Delete file
+    curl -X DELETE http://localhost:2026/api/threads/my-thread/uploads/document.pdf
+    ```
+  </Tab>
+  
+  <Tab title="Python">
+    ```python
+    import requests
+    
+    thread_id = "my-thread"
+    base_url = "http://localhost:2026"
+    
+    # Upload files
+    with open("document.pdf", "rb") as f1, \
+         open("presentation.pptx", "rb") as f2:
+        files = [
+            ("files", f1),
+            ("files", f2),
+        ]
+        response = requests.post(
+            f"{base_url}/api/threads/{thread_id}/uploads",
+            files=files
+        )
+        print(response.json())
+    
+    # List files
+    response = requests.get(
+        f"{base_url}/api/threads/{thread_id}/uploads/list"
+    )
+    print(response.json())
+    
+    # Delete file
+    response = requests.delete(
+        f"{base_url}/api/threads/{thread_id}/uploads/document.pdf"
+    )
+    print(response.json())
+    ```
+  </Tab>
+  
+  <Tab title="JavaScript/TypeScript">
+    ```typescript
+    const threadId = "my-thread";
+    const baseUrl = "http://localhost:2026";
+    
+    // Upload files
+    async function uploadFiles(files: File[]) {
+      const formData = new FormData();
+      files.forEach(file => {
+        formData.append('files', file);
+      });
+    
+      const response = await fetch(
+        `${baseUrl}/api/threads/${threadId}/uploads`,
+        {
+          method: 'POST',
+          body: formData,
+        }
+      );
+    
+      return response.json();
+    }
+    
+    // List files
+    async function listFiles() {
+      const response = await fetch(
+        `${baseUrl}/api/threads/${threadId}/uploads/list`
+      );
+      return response.json();
+    }
+    
+    // Delete file
+    async function deleteFile(filename: string) {
+      const response = await fetch(
+        `${baseUrl}/api/threads/${threadId}/uploads/${filename}`,
+        { method: 'DELETE' }
+      );
+      return response.json();
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Path Mapping
+
+Files are stored with three different path representations:
+
+<Steps>
+  <Step title="Physical Path">
+    Actual location on the filesystem:
+    ```
+    backend/.deer-flow/threads/{thread_id}/user-data/uploads/document.pdf
+    ```
+  </Step>
+  
+  <Step title="Virtual Path (Agent)">
+    Path used by the agent in sandbox:
+    ```
+    /mnt/user-data/uploads/document.pdf
+    ```
+    
+    The agent reads files using this path:
+    ```python
+    read_file("/mnt/user-data/uploads/document.pdf")
+    ```
+  </Step>
+  
+  <Step title="Artifact URL (Frontend)">
+    HTTP URL for frontend access:
+    ```
+    /api/threads/{thread_id}/artifacts/mnt/user-data/uploads/document.pdf
+    ```
+  </Step>
+</Steps>
+
+## File Storage Structure
+
+```
+backend/.deer-flow/threads/
+└── {thread_id}/
+    └── user-data/
+        └── uploads/
+            ├── document.pdf          # Original file
+            ├── document.md           # Converted Markdown
+            ├── presentation.pptx
+            ├── presentation.md
+            └── spreadsheet.xlsx
+            └── spreadsheet.md
+```
+
+<Info>
+  Each thread has its own isolated upload directory. Files cannot be accessed across threads.
+</Info>
+
+## Agent Integration
+
+### Automatic File Listing
+
+The `UploadsMiddleware` automatically injects uploaded files into every agent request:
+
+```xml
+<uploaded_files>
+The following files have been uploaded and are available for use:
+
+- document.pdf (1.2 MB)
+  Path: /mnt/user-data/uploads/document.pdf
+
+- document.md (45.3 KB)
+  Path: /mnt/user-data/uploads/document.md
+
+You can read these files using the `read_file` tool with the paths shown above.
+</uploaded_files>
+```
+
+### Reading Uploaded Files
+
+The agent can read files using the `read_file` tool:
+
+```python
+# Read original PDF (if binary reading is supported)
+read_file("/mnt/user-data/uploads/document.pdf")
+
+# Read converted Markdown (recommended)
+read_file("/mnt/user-data/uploads/document.md")
+```
+
+<Note>
+  Reading the Markdown version (`.md`) is recommended as it provides text content the agent can process.
+</Note>
+
+## Document Conversion
+
+DeerFlow uses [markitdown](https://github.com/microsoft/markitdown) to convert documents:
+
+### Conversion Process
+
+<Steps>
+  <Step title="Upload">
+    File uploaded via POST request
+  </Step>
+  
+  <Step title="Storage">
+    Original file saved to uploads directory
+  </Step>
+  
+  <Step title="Detection">
+    File extension checked against supported formats
+  </Step>
+  
+  <Step title="Conversion">
+    Document converted to Markdown using markitdown
+  </Step>
+  
+  <Step title="Save Markdown">
+    Converted file saved as `{filename}.md`
+  </Step>
+</Steps>
+
+### Handling Conversion Failures
+
+If conversion fails:
+- Original file is still saved
+- Error logged but not returned to user
+- Agent can still access original file
+- No Markdown file created
+
+```python
+try:
+    markdown_content = markitdown.convert(file_path)
+    save_markdown(markdown_content)
+except Exception as e:
+    logger.error(f"Conversion failed: {e}")
+    # Original file still accessible
+```
+
+## Frontend Integration
+
+Implement file upload in your UI:
+
+```tsx components/FileUpload.tsx
+import { useState } from 'react';
+
+export function FileUpload({ threadId }: { threadId: string }) {
+  const [uploading, setUploading] = useState(false);
+
+  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files) return;
+
+    setUploading(true);
+    const formData = new FormData();
+    
+    Array.from(files).forEach(file => {
+      formData.append('files', file);
+    });
+
+    try {
+      const response = await fetch(
+        `/api/threads/${threadId}/uploads`,
+        {
+          method: 'POST',
+          body: formData,
+        }
+      );
+
+      const result = await response.json();
+      console.log('Uploaded:', result);
+      
+      // Refresh file list or notify user
+    } catch (error) {
+      console.error('Upload failed:', error);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div>
+      <input
+        type="file"
+        multiple
+        onChange={handleUpload}
+        disabled={uploading}
+      />
+      {uploading && <span>Uploading...</span>}
+    </div>
+  );
+}
+```
+
+## Limits and Restrictions
+
+<AccordionGroup>
+  <Accordion title="File Size Limit">
+    Default: **100 MB** per file
+    
+    Configure in nginx:
+    ```nginx
+    client_max_body_size 100M;
+    ```
+  </Accordion>
+  
+  <Accordion title="File Name Security">
+    - Path traversal prevented (no `../` in filenames)
+    - Special characters sanitized
+    - Filenames normalized
+  </Accordion>
+  
+  <Accordion title="Thread Isolation">
+    - Each thread has separate upload directory
+    - Cross-thread access blocked
+    - Files deleted when thread is deleted
+  </Accordion>
+  
+  <Accordion title="Supported Conversions">
+    - PDF: ✅ Text extraction, images as placeholders
+    - Office (docx, xlsx, pptx): ✅ Full text extraction
+    - Images: ❌ No automatic OCR (consider adding)
+    - Archives (zip): ❌ No automatic extraction
+  </Accordion>
+</AccordionGroup>
+
+## Implementation Details
+
+### Components
+
+<CardGroup cols={3}>
+  <Card title="Upload Router" icon="code">
+    `src/gateway/routers/uploads.py`
+    
+    Handles HTTP endpoints
+  </Card>
+  
+  <Card title="Uploads Middleware" icon="layer-group">
+    `src/agents/middlewares/uploads_middleware.py`
+    
+    Injects file list into agent
+  </Card>
+  
+  <Card title="Artifacts Router" icon="file">
+    `src/gateway/routers/artifacts.py`
+    
+    Serves files to frontend
+  </Card>
+</CardGroup>
+
+### Dependencies
+
+```toml pyproject.toml
+[tool.uv.dependencies]
+markitdown = ">=0.0.1a2"    # Document conversion
+python-multipart = ">=0.0.20"  # File upload handling
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Upload fails with 413 error">
+    File exceeds size limit. Increase in nginx config:
+    
+    ```nginx docker/nginx/nginx.conf
+    client_max_body_size 200M;  # Increase to 200MB
+    ```
+    
+    Restart nginx:
+    ```bash
+    make stop
+    make dev
+    ```
+  </Accordion>
+  
+  <Accordion title="Conversion fails silently">
+    Check Gateway logs:
+    ```bash
+    tail -f logs/gateway.log | grep markitdown
+    ```
+    
+    Verify markitdown is installed:
+    ```bash
+    cd backend
+    uv run python -c "import markitdown"
+    ```
+  </Accordion>
+  
+  <Accordion title="Agent can't see uploaded files">
+    Verify:
+    1. Files uploaded successfully (check response)
+    2. UploadsMiddleware is registered in agent
+    3. Thread ID matches between upload and agent
+    4. Files exist in filesystem:
+       ```bash
+       ls backend/.deer-flow/threads/{thread_id}/user-data/uploads/
+       ```
+  </Accordion>
+  
+  <Accordion title="Files not accessible in sandbox">
+    For non-local sandbox:
+    - Ensure sandbox is running
+    - Check mount configuration
+    - Verify thread_id matches
+    - Check sandbox logs
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+1. **Validate Files Client-Side**
+   ```typescript
+   const MAX_SIZE = 100 * 1024 * 1024; // 100MB
+   
+   if (file.size > MAX_SIZE) {
+     alert('File too large');
+     return;
+   }
+   ```
+
+2. **Show Upload Progress**
+   ```typescript
+   const xhr = new XMLHttpRequest();
+   xhr.upload.addEventListener('progress', (e) => {
+     const percent = (e.loaded / e.total) * 100;
+     updateProgress(percent);
+   });
+   ```
+
+3. **Display File List**
+   ```typescript
+   const files = await fetch(`/api/threads/${threadId}/uploads/list`)
+     .then(r => r.json());
+   
+   displayFiles(files.files);
+   ```
+
+4. **Handle Errors Gracefully**
+   ```typescript
+   try {
+     await uploadFiles(files);
+   } catch (error) {
+     if (error.status === 413) {
+       alert('File too large');
+     } else {
+       alert('Upload failed');
+     }
+   }
+   ```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Custom Tools" icon="wrench" href="/guides/custom-tools">
+    Create tools that process uploaded files
+  </Card>
+  
+  <Card title="Creating Skills" icon="wand-magic-sparkles" href="/guides/creating-skills">
+    Build skills that work with documents
+  </Card>
+  
+  <Card title="API Reference" icon="book" href="/api-reference/uploads">
+    Complete upload API documentation
+  </Card>
+  
+  <Card title="Configuration" icon="gear" href="/configuration/overview">
+    Configure file handling settings
+  </Card>
+</CardGroup>

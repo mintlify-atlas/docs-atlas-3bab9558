@@ -1,0 +1,153 @@
+---
+title: "Python Client Overview"
+description: "Embedded Python client for DeerFlow agent system"
+icon: "code"
+---
+
+## Introduction
+
+The `DeerFlowClient` is an embedded Python client that provides direct programmatic access to DeerFlow's agent capabilities without requiring LangGraph Server or Gateway API processes.
+
+<Info>
+The Python Client implements the same protocol as the Gateway API, making it easy to switch between embedded mode and HTTP streaming without changing your event-handling logic.
+</Info>
+
+## Installation
+
+The client is included in the DeerFlow backend package:
+
+```python
+from src.client import DeerFlowClient
+```
+
+## Basic Usage
+
+### Simple Chat
+
+```python
+from src.client import DeerFlowClient
+
+client = DeerFlowClient()
+response = client.chat("Analyze this paper for me", thread_id="my-thread")
+print(response)
+```
+
+### Streaming Responses
+
+```python
+for event in client.stream("hello"):
+    print(event.type, event.data)
+```
+
+### Query Configuration
+
+```python
+# List available models
+models = client.list_models()
+print(models)
+
+# List skills
+skills = client.list_skills()
+print(skills)
+```
+
+## Initialization Options
+
+The client accepts several configuration parameters:
+
+<ParamField path="config_path" type="str | None" default="None">
+  Path to config.yaml. Uses default resolution if None.
+</ParamField>
+
+<ParamField path="checkpointer" type="LangGraph Checkpointer" default="None">
+  LangGraph checkpointer instance for state persistence. **Required for multi-turn conversations** on the same thread_id. Without a checkpointer, each call is stateless.
+</ParamField>
+
+<ParamField path="model_name" type="str | None" default="None">
+  Override the default model name from config.
+</ParamField>
+
+<ParamField path="thinking_enabled" type="bool" default="True">
+  Enable model's extended thinking mode.
+</ParamField>
+
+<ParamField path="subagent_enabled" type="bool" default="False">
+  Enable subagent delegation capabilities.
+</ParamField>
+
+<ParamField path="plan_mode" type="bool" default="False">
+  Enable TodoList middleware for plan mode.
+</ParamField>
+
+## Example: Custom Configuration
+
+```python
+client = DeerFlowClient(
+    config_path="/path/to/config.yaml",
+    model_name="gpt-4",
+    thinking_enabled=False,
+    subagent_enabled=True
+)
+```
+
+## Gateway API Alignment
+
+The DeerFlowClient is designed to align with the Gateway API:
+
+- **Event types** match the LangGraph SSE protocol
+- **Response schemas** mirror Gateway API responses
+- **File operations** use the same virtual path structure
+
+This means you can develop locally with the embedded client and deploy with the Gateway API without changing your code.
+
+## Multi-Turn Conversations
+
+<Warning>
+Multi-turn conversations require a `checkpointer` at initialization. Without one, each `stream()` / `chat()` call is stateless — `thread_id` is only used for file isolation (uploads / artifacts).
+</Warning>
+
+```python
+from langgraph.checkpoint.memory import MemorySaver
+
+checkpointer = MemorySaver()
+client = DeerFlowClient(checkpointer=checkpointer)
+
+# First turn
+response1 = client.chat("My name is Alice", thread_id="conversation-1")
+
+# Second turn - context is preserved
+response2 = client.chat("What's my name?", thread_id="conversation-1")
+```
+
+## Agent Recreation
+
+<Note>
+The system prompt (including date, memory, and skills context) is generated when the internal agent is first created and cached until the configuration key changes.
+</Note>
+
+Call `reset_agent()` to force a refresh in long-running processes:
+
+```python
+client.reset_agent()
+```
+
+This is useful after:
+- External changes to memory
+- Skill installations
+- Configuration updates that should be reflected in the system prompt
+
+## API Reference
+
+For detailed method documentation, see:
+
+<CardGroup cols={2}>
+  <Card title="Chat" icon="message" href="/api/python-client/chat">
+    Single-message request/response
+  </Card>
+  <Card title="Streaming" icon="stream" href="/api/python-client/streaming">
+    Real-time event streaming
+  </Card>
+  <Card title="Configuration" icon="gear" href="/api/python-client/configuration">
+    Models, skills, memory, and file management
+  </Card>
+</CardGroup>

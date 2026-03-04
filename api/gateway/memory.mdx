@@ -1,0 +1,442 @@
+---
+title: 'Memory API'
+description: 'Access and manage global memory data for personalized conversations'
+---
+
+## Overview
+
+The Memory API provides endpoints to retrieve and manage DeerFlow's global memory system. Memory stores user context, conversation history, and facts across all threads for personalized AI interactions.
+
+## Get Memory Data
+
+<Card title="GET /api/memory" icon="database">
+  Retrieve the current global memory data including user context, history, and facts
+</Card>
+
+### Response
+
+<ResponseField name="version" type="string" default="1.0">
+  Memory schema version
+</ResponseField>
+
+<ResponseField name="lastUpdated" type="string">
+  Last update timestamp (ISO 8601 format)
+</ResponseField>
+
+<ResponseField name="user" type="object">
+  User context sections
+  
+  <Expandable title="User Context">
+    <ResponseField name="workContext" type="object">
+      Work-related context
+      
+      <Expandable title="Context Section">
+        <ResponseField name="summary" type="string">
+          Summary content
+        </ResponseField>
+        <ResponseField name="updatedAt" type="string">
+          Last update timestamp
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    
+    <ResponseField name="personalContext" type="object">
+      Personal preferences and context
+    </ResponseField>
+    
+    <ResponseField name="topOfMind" type="object">
+      Current priorities and focus areas
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="history" type="object">
+  Historical context sections
+  
+  <Expandable title="History Context">
+    <ResponseField name="recentMonths" type="object">
+      Recent development activities
+    </ResponseField>
+    
+    <ResponseField name="earlierContext" type="object">
+      Earlier historical context
+    </ResponseField>
+    
+    <ResponseField name="longTermBackground" type="object">
+      Long-term background information
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="facts" type="array">
+  List of memory facts
+  
+  <Expandable title="Fact Object">
+    <ResponseField name="id" type="string" required>
+      Unique identifier for the fact
+    </ResponseField>
+    
+    <ResponseField name="content" type="string" required>
+      Fact content
+    </ResponseField>
+    
+    <ResponseField name="category" type="string" default="context">
+      Fact category (e.g., preference, context, skill)
+    </ResponseField>
+    
+    <ResponseField name="confidence" type="number" default="0.5">
+      Confidence score (0-1)
+    </ResponseField>
+    
+    <ResponseField name="createdAt" type="string">
+      Creation timestamp
+    </ResponseField>
+    
+    <ResponseField name="source" type="string" default="unknown">
+      Source thread ID
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Request
+
+```bash
+curl http://localhost:8001/api/memory
+```
+
+### Example Response
+
+```json
+{
+  "version": "1.0",
+  "lastUpdated": "2024-01-15T10:30:00Z",
+  "user": {
+    "workContext": {
+      "summary": "Working on DeerFlow documentation and API development",
+      "updatedAt": "2024-01-15T10:30:00Z"
+    },
+    "personalContext": {
+      "summary": "Prefers concise responses with code examples",
+      "updatedAt": "2024-01-14T15:20:00Z"
+    },
+    "topOfMind": {
+      "summary": "Building Gateway API documentation",
+      "updatedAt": "2024-01-15T09:00:00Z"
+    }
+  },
+  "history": {
+    "recentMonths": {
+      "summary": "Recent development activities on DeerFlow project",
+      "updatedAt": "2024-01-15T10:30:00Z"
+    },
+    "earlierContext": {
+      "summary": "",
+      "updatedAt": ""
+    },
+    "longTermBackground": {
+      "summary": "",
+      "updatedAt": ""
+    }
+  },
+  "facts": [
+    {
+      "id": "fact_abc123",
+      "content": "User prefers TypeScript over JavaScript",
+      "category": "preference",
+      "confidence": 0.9,
+      "createdAt": "2024-01-15T10:30:00Z",
+      "source": "thread_xyz"
+    },
+    {
+      "id": "fact_def456",
+      "content": "User is experienced with FastAPI and Python",
+      "category": "skill",
+      "confidence": 0.85,
+      "createdAt": "2024-01-14T14:20:00Z",
+      "source": "thread_abc"
+    }
+  ]
+}
+```
+
+---
+
+## Reload Memory Data
+
+<Card title="POST /api/memory/reload" icon="arrows-rotate">
+  Reload memory data from the storage file, refreshing the in-memory cache
+</Card>
+
+### Response
+
+Returns the reloaded memory data (same structure as GET /api/memory).
+
+### Example Request
+
+```bash
+curl -X POST http://localhost:8001/api/memory/reload
+```
+
+### Use Case
+
+Use this endpoint when the memory file has been modified externally and you need to refresh the cached data without restarting the server.
+
+---
+
+## Get Memory Configuration
+
+<Card title="GET /api/memory/config" icon="gear">
+  Retrieve the current memory system configuration
+</Card>
+
+### Response
+
+<ResponseField name="enabled" type="boolean" required>
+  Whether memory is enabled
+</ResponseField>
+
+<ResponseField name="storage_path" type="string" required>
+  Path to memory storage file (relative to project root)
+</ResponseField>
+
+<ResponseField name="debounce_seconds" type="integer" required>
+  Debounce time for memory updates (seconds)
+</ResponseField>
+
+<ResponseField name="max_facts" type="integer" required>
+  Maximum number of facts to store
+</ResponseField>
+
+<ResponseField name="fact_confidence_threshold" type="number" required>
+  Minimum confidence threshold for facts (0-1)
+</ResponseField>
+
+<ResponseField name="injection_enabled" type="boolean" required>
+  Whether memory injection is enabled
+</ResponseField>
+
+<ResponseField name="max_injection_tokens" type="integer" required>
+  Maximum tokens for memory injection into prompts
+</ResponseField>
+
+### Example Request
+
+```bash
+curl http://localhost:8001/api/memory/config
+```
+
+### Example Response
+
+```json
+{
+  "enabled": true,
+  "storage_path": ".deer-flow/memory.json",
+  "debounce_seconds": 30,
+  "max_facts": 100,
+  "fact_confidence_threshold": 0.7,
+  "injection_enabled": true,
+  "max_injection_tokens": 2000
+}
+```
+
+---
+
+## Get Memory Status
+
+<Card title="GET /api/memory/status" icon="circle-info">
+  Retrieve both memory configuration and current data in a single request
+</Card>
+
+### Response
+
+<ResponseField name="config" type="object">
+  Memory configuration (same as GET /api/memory/config)
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Memory data (same as GET /api/memory)
+</ResponseField>
+
+### Example Request
+
+```bash
+curl http://localhost:8001/api/memory/status
+```
+
+### Example Response
+
+```json
+{
+  "config": {
+    "enabled": true,
+    "storage_path": ".deer-flow/memory.json",
+    "debounce_seconds": 30,
+    "max_facts": 100,
+    "fact_confidence_threshold": 0.7,
+    "injection_enabled": true,
+    "max_injection_tokens": 2000
+  },
+  "data": {
+    "version": "1.0",
+    "lastUpdated": "2024-01-15T10:30:00Z",
+    "user": {
+      "workContext": {
+        "summary": "Working on DeerFlow project",
+        "updatedAt": "2024-01-15T10:30:00Z"
+      },
+      "personalContext": {
+        "summary": "",
+        "updatedAt": ""
+      },
+      "topOfMind": {
+        "summary": "",
+        "updatedAt": ""
+      }
+    },
+    "history": {
+      "recentMonths": {
+        "summary": "",
+        "updatedAt": ""
+      },
+      "earlierContext": {
+        "summary": "",
+        "updatedAt": ""
+      },
+      "longTermBackground": {
+        "summary": "",
+        "updatedAt": ""
+      }
+    },
+    "facts": []
+  }
+}
+```
+
+---
+
+## Memory System
+
+### How Memory Works
+
+1. **Collection**: Memory is collected from conversations across all threads
+2. **Storage**: Memory data is persisted to a JSON file (`.deer-flow/memory.json`)
+3. **Injection**: Memory is automatically injected into AI prompts when enabled
+4. **Updates**: Memory is updated with debouncing to prevent excessive writes
+
+### Memory Categories
+
+#### User Context
+
+- **workContext**: Work-related information and current projects
+- **personalContext**: Personal preferences, communication style
+- **topOfMind**: Current priorities and focus areas
+
+#### History Context
+
+- **recentMonths**: Recent development activities and conversations
+- **earlierContext**: Historical context from earlier periods
+- **longTermBackground**: Long-term background information
+
+#### Facts
+
+Structured facts extracted from conversations:
+
+- **preference**: User preferences (e.g., coding style, tools)
+- **skill**: User skills and expertise
+- **context**: General contextual information
+- **goal**: User goals and objectives
+
+### Confidence Scores
+
+Facts have confidence scores (0-1) indicating reliability:
+
+- **0.9-1.0**: High confidence (explicitly stated by user)
+- **0.7-0.9**: Medium confidence (inferred from behavior)
+- **0.5-0.7**: Low confidence (weak signals)
+- **< 0.5**: Very low confidence (filtered out by default)
+
+---
+
+## Configuration
+
+Memory can be configured in your application config:
+
+```yaml
+memory:
+  enabled: true
+  storage_path: ".deer-flow/memory.json"
+  debounce_seconds: 30
+  max_facts: 100
+  fact_confidence_threshold: 0.7
+  injection_enabled: true
+  max_injection_tokens: 2000
+```
+
+### Parameters
+
+- **enabled**: Enable/disable memory system
+- **storage_path**: Path to memory JSON file
+- **debounce_seconds**: Wait time before writing updates
+- **max_facts**: Maximum number of facts to store
+- **fact_confidence_threshold**: Minimum confidence to keep facts
+- **injection_enabled**: Enable/disable memory injection into prompts
+- **max_injection_tokens**: Maximum tokens to inject
+
+---
+
+## Use Cases
+
+### Display Memory Data
+
+```typescript
+const response = await fetch('http://localhost:8001/api/memory');
+const memory = await response.json();
+
+console.log('User Context:', memory.user.workContext.summary);
+console.log('Total Facts:', memory.facts.length);
+```
+
+### Filter High-Confidence Facts
+
+```typescript
+const response = await fetch('http://localhost:8001/api/memory');
+const { facts } = await response.json();
+
+const highConfidenceFacts = facts.filter(f => f.confidence >= 0.8);
+const preferences = facts.filter(f => f.category === 'preference');
+```
+
+### Check Memory Status
+
+```typescript
+const response = await fetch('http://localhost:8001/api/memory/status');
+const { config, data } = await response.json();
+
+if (config.enabled && config.injection_enabled) {
+  console.log('Memory is active and injecting context');
+  console.log(`Last updated: ${data.lastUpdated}`);
+}
+```
+
+### Reload Memory
+
+```typescript
+// After external modification
+const response = await fetch('http://localhost:8001/api/memory/reload', {
+  method: 'POST'
+});
+const refreshedMemory = await response.json();
+```
+
+---
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Memory System" icon="brain" href="/customize/memory">
+    Learn about the memory system
+  </Card>
+  <Card title="Gateway Overview" icon="book" href="/api/gateway/overview">
+    Learn about the Gateway API
+  </Card>
+</CardGroup>

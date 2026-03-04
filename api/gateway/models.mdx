@@ -1,0 +1,195 @@
+---
+title: 'Models API'
+description: 'Query and retrieve available AI models and their configurations'
+---
+
+## Overview
+
+The Models API provides endpoints to query available AI models configured in DeerFlow. Models are configured in the application's configuration file and include metadata about their capabilities.
+
+## List All Models
+
+<Card title="GET /api/models" icon="list">
+  Retrieve a list of all available AI models configured in the system
+</Card>
+
+### Response
+
+<ResponseField name="models" type="array">
+  List of all configured models with their metadata
+  
+  <Expandable title="Model Object">
+    <ResponseField name="name" type="string" required>
+      Unique identifier for the model
+    </ResponseField>
+    
+    <ResponseField name="display_name" type="string">
+      Human-readable name for display purposes
+    </ResponseField>
+    
+    <ResponseField name="description" type="string">
+      Description of the model's capabilities
+    </ResponseField>
+    
+    <ResponseField name="supports_thinking" type="boolean" default="false">
+      Whether the model supports thinking/reasoning mode
+    </ResponseField>
+    
+    <ResponseField name="supports_reasoning_effort" type="boolean" default="false">
+      Whether the model supports configurable reasoning effort levels
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Request
+
+```bash
+curl http://localhost:8001/api/models
+```
+
+### Example Response
+
+```json
+{
+  "models": [
+    {
+      "name": "gpt-4",
+      "display_name": "GPT-4",
+      "description": "OpenAI GPT-4 model",
+      "supports_thinking": false,
+      "supports_reasoning_effort": false
+    },
+    {
+      "name": "claude-3-opus",
+      "display_name": "Claude 3 Opus",
+      "description": "Anthropic Claude 3 Opus model",
+      "supports_thinking": true,
+      "supports_reasoning_effort": false
+    },
+    {
+      "name": "o1",
+      "display_name": "OpenAI o1",
+      "description": "OpenAI o1 reasoning model",
+      "supports_thinking": false,
+      "supports_reasoning_effort": true
+    }
+  ]
+}
+```
+
+---
+
+## Get Model Details
+
+<Card title="GET /api/models/{model_name}" icon="circle-info">
+  Retrieve detailed information about a specific AI model by its name
+</Card>
+
+### Path Parameters
+
+<ParamField path="model_name" type="string" required>
+  The unique name of the model to retrieve (e.g., `gpt-4`, `claude-3-opus`)
+</ParamField>
+
+### Response
+
+<ResponseField name="name" type="string" required>
+  Unique identifier for the model
+</ResponseField>
+
+<ResponseField name="display_name" type="string">
+  Human-readable name
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Model description
+</ResponseField>
+
+<ResponseField name="supports_thinking" type="boolean" default="false">
+  Whether model supports thinking mode
+</ResponseField>
+
+<ResponseField name="supports_reasoning_effort" type="boolean" default="false">
+  Whether model supports reasoning effort
+</ResponseField>
+
+### Example Request
+
+```bash
+curl http://localhost:8001/api/models/gpt-4
+```
+
+### Example Response
+
+```json
+{
+  "name": "gpt-4",
+  "display_name": "GPT-4",
+  "description": "OpenAI GPT-4 model",
+  "supports_thinking": false,
+  "supports_reasoning_effort": false
+}
+```
+
+### Error Responses
+
+<ResponseField name="404" type="Not Found">
+  Model not found
+  
+  ```json
+  {
+    "detail": "Model 'invalid-model' not found"
+  }
+  ```
+</ResponseField>
+
+---
+
+## Model Capabilities
+
+### Thinking Mode
+
+Models with `supports_thinking: true` can use extended thinking/reasoning capabilities. This is typically available in Claude models.
+
+### Reasoning Effort
+
+Models with `supports_reasoning_effort: true` support configurable reasoning effort levels (e.g., OpenAI's o1 series). This allows you to control how much computational effort the model applies to reasoning.
+
+## Use Cases
+
+### Frontend Model Selection
+
+Use the `/api/models` endpoint to populate model selection dropdowns:
+
+```typescript
+const response = await fetch('http://localhost:8001/api/models');
+const { models } = await response.json();
+
+// Filter models with specific capabilities
+const thinkingModels = models.filter(m => m.supports_thinking);
+const reasoningModels = models.filter(m => m.supports_reasoning_effort);
+```
+
+### Capability Detection
+
+Check if a specific model supports certain features:
+
+```typescript
+const response = await fetch(`http://localhost:8001/api/models/${modelName}`);
+const model = await response.json();
+
+if (model.supports_thinking) {
+  // Show thinking mode toggle
+}
+```
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Gateway Overview" icon="book" href="/api/gateway/overview">
+    Learn about the Gateway API
+  </Card>
+  <Card title="Configuration" icon="gear" href="/customize/configuration">
+    Configure AI models
+  </Card>
+</CardGroup>

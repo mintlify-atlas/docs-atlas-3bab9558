@@ -1,0 +1,496 @@
+---
+title: Plan Mode
+description: Enable task tracking with TodoList for complex multi-step workflows
+---
+
+## Overview
+
+Plan Mode adds a TodoList middleware to the agent, providing task tracking capabilities for complex multi-step workflows. When enabled, the agent can break down tasks, track progress, and provide visibility into what's being done.
+
+<Info>
+  Plan Mode uses LangChain's built-in `TodoListMiddleware` with custom DeerFlow-style prompts.
+</Info>
+
+### Benefits
+
+<CardGroup cols={2}>
+  <Card title="Task Breakdown" icon="list-check">
+    Break complex tasks into manageable steps
+  </Card>
+  
+  <Card title="Progress Tracking" icon="chart-line">
+    Track task status in real-time
+  </Card>
+  
+  <Card title="User Visibility" icon="eye">
+    Users see what the agent is working on
+  </Card>
+  
+  <Card title="Parallel Execution" icon="code-branch">
+    Multiple tasks can be in progress simultaneously
+  </Card>
+</CardGroup>
+
+## Enabling Plan Mode
+
+Plan Mode is controlled via **runtime configuration** through the `is_plan_mode` parameter in `RunnableConfig`.
+
+<Warning>
+  Plan Mode is **disabled by default**. You must explicitly enable it per request.
+</Warning>
+
+### Basic Configuration
+
+```python
+from langchain_core.runnables import RunnableConfig
+from src.agents.lead_agent.agent import make_lead_agent
+
+# Enable plan mode
+config = RunnableConfig(
+    configurable={
+        "thread_id": "example-thread",
+        "thinking_enabled": True,
+        "is_plan_mode": True,  # Enable plan mode
+    }
+)
+
+# Create agent with plan mode enabled
+agent = make_lead_agent(config)
+```
+
+### Dynamic Plan Mode
+
+You can enable/disable plan mode dynamically based on task complexity:
+
+```python
+def create_agent_for_task(task_complexity: str):
+    """Create agent with plan mode based on task complexity."""
+    is_complex = task_complexity in ["high", "very_high"]
+    
+    config = RunnableConfig(
+        configurable={
+            "thread_id": f"task-{task_complexity}",
+            "thinking_enabled": True,
+            "is_plan_mode": is_complex,  # Enable only for complex tasks
+        }
+    )
+    
+    return make_lead_agent(config)
+
+# Simple task - no TodoList needed
+simple_agent = create_agent_for_task("low")
+
+# Complex task - TodoList enabled
+complex_agent = create_agent_for_task("high")
+```
+
+## How It Works
+
+<Steps>
+  <Step title="Agent Creation">
+    When `make_lead_agent(config)` is called, it extracts `is_plan_mode` from `config.configurable`.
+  </Step>
+  
+  <Step title="Middleware Chain">
+    Config is passed to `_build_middlewares(config)` which reads `is_plan_mode` and calls `_create_todo_list_middleware(is_plan_mode)`.
+  </Step>
+  
+  <Step title="TodoList Middleware">
+    If `is_plan_mode=True`, a `TodoListMiddleware` instance is created and added to the middleware chain.
+  </Step>
+  
+  <Step title="Tool Registration">
+    The middleware automatically adds a `write_todos` tool to the agent's toolset.
+  </Step>
+  
+  <Step title="State Management">
+    The middleware handles the todo list state and provides it to the agent on each turn.
+  </Step>
+</Steps>
+
+## Middleware Architecture
+
+```
+make_lead_agent(config)
+  │
+  ├─> Extracts: is_plan_mode = config.configurable.get("is_plan_mode", False)
+  │
+  └─> _build_middlewares(config)
+        │
+        ├─> ThreadDataMiddleware
+        ├─> SandboxMiddleware
+        ├─> UploadsMiddleware
+        ├─> SummarizationMiddleware (if enabled)
+        ├─> TodoListMiddleware (if is_plan_mode=True) ← NEW
+        ├─> TitleMiddleware
+        └─> ClarificationMiddleware
+```
+
+## The write_todos Tool
+
+When Plan Mode is enabled, the agent has access to a `write_todos` tool:
+
+### Tool Description
+
+```
+Manage a todo list to track multi-step tasks and complex workflows.
+Use this tool to break down complex requests into manageable steps.
+
+When to Use:
+- Complex multi-step tasks (3+ distinct steps)
+- Non-trivial tasks requiring careful planning
+- When user explicitly requests a todo list
+- When user provides multiple tasks
+
+When NOT to Use:
+- Single, straightforward tasks
+- Trivial tasks (< 3 steps)
+- Purely conversational requests
+```
+
+### Task States
+
+<Tabs>
+  <Tab title="pending">
+    Task not yet started.
+    
+    ```json
+    {
+      "task": "Research competitor pricing",
+      "status": "pending"
+    }
+    ```
+  </Tab>
+  
+  <Tab title="in_progress">
+    Currently being worked on. Multiple tasks can be in progress simultaneously.
+    
+    ```json
+    {
+      "task": "Research competitor pricing",
+      "status": "in_progress"
+    }
+    ```
+  </Tab>
+  
+  <Tab title="completed">
+    Task finished successfully.
+    
+    ```json
+    {
+      "task": "Research competitor pricing",
+      "status": "completed"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Using write_todos
+
+The agent uses the tool to manage its task list:
+
+<CodeGroup>
+```json Create Tasks
+{
+  "todos": [
+    {"task": "Research competitor pricing", "status": "pending"},
+    {"task": "Analyze market trends", "status": "pending"},
+    {"task": "Create comparison report", "status": "pending"}
+  ]
+}
+```
+
+```json Update Progress
+{
+  "todos": [
+    {"task": "Research competitor pricing", "status": "in_progress"},
+    {"task": "Analyze market trends", "status": "pending"},
+    {"task": "Create comparison report", "status": "pending"}
+  ]
+}
+```
+
+```json Complete Task
+{
+  "todos": [
+    {"task": "Research competitor pricing", "status": "completed"},
+    {"task": "Analyze market trends", "status": "in_progress"},
+    {"task": "Create comparison report", "status": "pending"}
+  ]
+}
+```
+</CodeGroup>
+
+## When to Use Plan Mode
+
+### Ideal Use Cases
+
+<AccordionGroup>
+  <Accordion title="Multi-Step Research Projects">
+    When tasks require:
+    - Multiple searches from different angles
+    - Data collection from various sources
+    - Synthesis of information
+    
+    Example: "Research AI trends in healthcare and create a report"
+  </Accordion>
+  
+  <Accordion title="Content Generation with Research">
+    When creating:
+    - Presentations (research → outline → slides)
+    - Reports (gather data → analyze → write)
+    - Web pages (research design → implement)
+    
+    Example: "Create a slide deck about climate change solutions"
+  </Accordion>
+  
+  <Accordion title="Code Projects">
+    When building:
+    - Applications with multiple components
+    - Features requiring setup, implementation, testing
+    - Refactoring projects
+    
+    Example: "Build a todo app with authentication"
+  </Accordion>
+  
+  <Accordion title="Analysis Tasks">
+    When performing:
+    - Data analysis with multiple stages
+    - Comparative analysis
+    - Complex calculations
+    
+    Example: "Analyze this dataset and create visualizations"
+  </Accordion>
+</AccordionGroup>
+
+### When NOT to Use
+
+- ❌ Single, straightforward questions
+- ❌ Quick conversational queries
+- ❌ Simple file operations
+- ❌ Trivial calculations
+
+## Custom Prompts
+
+DeerFlow uses custom prompts that match the overall prompt style:
+
+### System Prompt Features
+
+- Uses XML tags (`<todo_list_system>`) for consistency
+- Emphasizes CRITICAL rules and best practices
+- Clear "When to Use" vs "When NOT to Use" guidelines
+- Focuses on real-time updates and immediate completion
+
+### Tool Description Features
+
+- Detailed usage scenarios with examples
+- Strong emphasis on NOT using for simple tasks
+- Clear task state definitions
+- Comprehensive best practices
+- Task completion requirements
+
+<Info>
+  Custom prompts are defined in `_create_todo_list_middleware()` in `backend/src/agents/lead_agent/agent.py:57`.
+</Info>
+
+## Example Workflow
+
+Here's how Plan Mode works in practice:
+
+<Steps>
+  <Step title="User Request">
+    User asks: "Research AI coding assistants and create a comparison report"
+  </Step>
+  
+  <Step title="Initial Planning">
+    Agent recognizes this is complex and uses `write_todos`:
+    
+    ```json
+    {
+      "todos": [
+        {"task": "Research popular AI coding assistants", "status": "pending"},
+        {"task": "Gather feature comparisons", "status": "pending"},
+        {"task": "Analyze pricing models", "status": "pending"},
+        {"task": "Create comparison report", "status": "pending"}
+      ]
+    }
+    ```
+  </Step>
+  
+  <Step title="Task Execution">
+    Agent works through tasks, updating status:
+    
+    ```json
+    {
+      "todos": [
+        {"task": "Research popular AI coding assistants", "status": "completed"},
+        {"task": "Gather feature comparisons", "status": "in_progress"},
+        {"task": "Analyze pricing models", "status": "pending"},
+        {"task": "Create comparison report", "status": "pending"}
+      ]
+    }
+    ```
+  </Step>
+  
+  <Step title="Completion">
+    All tasks marked completed:
+    
+    ```json
+    {
+      "todos": [
+        {"task": "Research popular AI coding assistants", "status": "completed"},
+        {"task": "Gather feature comparisons", "status": "completed"},
+        {"task": "Analyze pricing models", "status": "completed"},
+        {"task": "Create comparison report", "status": "completed"}
+      ]
+    }
+    ```
+  </Step>
+</Steps>
+
+## Accessing Todo State
+
+The todo list is stored in the thread state:
+
+```python
+from src.agents.lead_agent.state import ThreadState
+
+# Access current todos
+def get_todos(state: ThreadState) -> list[dict]:
+    return state.get("todos", [])
+
+# Example todos structure
+todos = [
+    {
+        "task": "Research competitors",
+        "status": "completed"
+    },
+    {
+        "task": "Create report",
+        "status": "in_progress"
+    }
+]
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use for Appropriate Complexity">
+    Enable Plan Mode for tasks that genuinely benefit from tracking:
+    - 3+ distinct steps
+    - Multiple stages
+    - Long-running operations
+    
+    Don't use for simple queries.
+  </Accordion>
+  
+  <Accordion title="Clear Task Descriptions">
+    Tasks should be:
+    - Specific and actionable
+    - Independent when possible
+    - Properly sequenced when dependent
+    
+    ✅ Good: "Research competitor pricing models"
+    ❌ Bad: "Do research"
+  </Accordion>
+  
+  <Accordion title="Update Status Promptly">
+    Mark tasks as completed immediately after finishing:
+    - Don't batch multiple completions
+    - Update status before moving to next task
+    - Ensure "completed" reflects actual completion
+  </Accordion>
+  
+  <Accordion title="Parallel Execution">
+    Multiple tasks can be in_progress simultaneously for:
+    - Independent tasks
+    - Waiting on external operations
+    - Parallel research
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="TodoList not appearing">
+    Verify plan mode is enabled:
+    ```python
+    config = RunnableConfig(
+        configurable={
+            "is_plan_mode": True  # Must be True
+        }
+    )
+    ```
+  </Accordion>
+  
+  <Accordion title="Agent not using write_todos">
+    Task might be too simple. Try:
+    - More complex, multi-step requests
+    - Explicit instruction: "Create a plan first"
+    - Check if task has 3+ distinct steps
+  </Accordion>
+  
+  <Accordion title="Tasks stuck in pending">
+    Agent might not be updating status. This is usually:
+    - Expected behavior (task not started yet)
+    - Processing issue (check logs)
+    - Task might be blocked waiting for clarification
+  </Accordion>
+  
+  <Accordion title="Too many tasks created">
+    Agent might be over-planning. Consider:
+    - Using a less complex prompt
+    - Disabling plan mode for this task
+    - Providing more specific instructions
+  </Accordion>
+</AccordionGroup>
+
+## Configuration Reference
+
+### Runtime Configuration
+
+```python
+RunnableConfig(
+    configurable={
+        "thread_id": str,          # Required: Thread identifier
+        "thinking_enabled": bool,   # Optional: Enable thinking mode
+        "is_plan_mode": bool,      # Optional: Enable plan mode (default: False)
+    }
+)
+```
+
+### Middleware Position
+
+TodoListMiddleware is positioned before ClarificationMiddleware:
+
+```
+1. ThreadDataMiddleware
+2. SandboxMiddleware
+3. UploadsMiddleware
+4. SummarizationMiddleware (if enabled)
+5. TodoListMiddleware (if plan_mode) ← HERE
+6. TitleMiddleware
+7. ClarificationMiddleware
+```
+
+This allows todo management during clarification flows.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Creating Skills" icon="wand-magic-sparkles" href="/guides/creating-skills">
+    Build skills that leverage Plan Mode
+  </Card>
+  
+  <Card title="Custom Tools" icon="wrench" href="/guides/custom-tools">
+    Create tools for task execution
+  </Card>
+  
+  <Card title="Configuration" icon="gear" href="/configuration/agent">
+    Learn about agent configuration
+  </Card>
+  
+  <Card title="Architecture" icon="diagram-project" href="/architecture/agents">
+    Understand agent and middleware architecture
+  </Card>
+</CardGroup>

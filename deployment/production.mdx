@@ -1,0 +1,1141 @@
+---
+title: Production Deployment
+description: Production-ready deployment guide with security, scaling, monitoring, and backup strategies
+---
+
+Deploy DeerFlow to production with enterprise-grade security, reliability, and performance.
+
+## Architecture Overview
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                    Load Balancer / CDN                      │
+│                   (Cloudflare, AWS ALB)                     │
+└──────────────────────────┬─────────────────────────────────┘
+                           │
+                           ▼
+┌────────────────────────────────────────────────────────────┐
+│                    Nginx / API Gateway                      │
+│              (SSL termination, rate limiting)               │
+└───────┬──────────────────┬─────────────────┬───────────────┘
+        │                  │                 │
+        ▼                  ▼                 ▼
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│  Frontend    │  │   Gateway    │  │  LangGraph   │
+│  (Replicas)  │  │  (Replicas)  │  │  (Replicas)  │
+└──────────────┘  └──────┬───────┘  └──────┬───────┘
+                         │                  │
+                         ▼                  ▼
+              ┌──────────────────────────────────┐
+              │      Shared Storage (NFS/EFS)    │
+              │  - Thread data                   │
+              │  - Skills                        │
+              │  - Artifacts                     │
+              └──────────────────────────────────┘
+                         │
+                         ▼
+              ┌──────────────────────────────────┐
+              │     Sandbox Provisioner          │
+              │   (Kubernetes-based sandboxes)   │
+              └──────────────────────────────────┘
+```
+
+## Pre-deployment Checklist
+
+### Infrastructure
+
+- [ ] Kubernetes cluster (EKS, GKE, AKS, or self-hosted)
+- [ ] Container registry (ECR, GCR, Docker Hub)
+- [ ] Load balancer (ALB, GCE LB, Nginx Ingress)
+- [ ] TLS certificates (Let's Encrypt, AWS ACM)
+- [ ] Shared storage (NFS, EFS, Cloud Filestore)
+- [ ] Database for checkpoints (PostgreSQL, Redis)
+- [ ] Monitoring stack (Prometheus, Grafana)
+- [ ] Logging aggregation (ELK, CloudWatch, Loki)
+- [ ] Backup solution (Velero, cloud snapshots)
+
+### Security
+
+- [ ] API keys stored in secrets manager (Vault, AWS Secrets Manager)
+- [ ] Network policies configured
+- [ ] RBAC policies defined
+- [ ] Security scanning enabled (Snyk, Trivy)
+- [ ] SSL/TLS certificates deployed
+- [ ] Rate limiting configured
+- [ ] DDoS protection enabled
+- [ ] Audit logging enabled
+
+### Configuration
+
+- [ ] `config.yaml` prepared for production
+- [ ] Environment-specific settings configured
+- [ ] Resource limits defined
+- [ ] Auto-scaling policies configured
+- [ ] Health check endpoints tested
+- [ ] Backup retention policies defined
+
+## Production Configuration
+
+### config.yaml
+
+Production-ready configuration:
+
+```yaml
+models:
+  - name: gpt-4
+    display_name: GPT-4
+    use: langchain_openai:ChatOpenAI
+    model: gpt-4
+    api_key: $OPENAI_API_KEY  # From secrets manager
+    max_tokens: 4096
+    temperature: 0.7
+    timeout: 120  # Increased timeout
+    max_retries: 3  # Retry failed requests
+
+tool_groups:
+  - name: web
+  - name: file:read
+  - name: file:write
+  - name: bash
+
+tools:
+  - name: web_search
+    group: web
+    use: src.community.tavily.tools:web_search_tool
+    max_results: 5
+    timeout: 30
+  
+  - name: web_fetch
+    group: web
+    use: src.community.jina_ai.tools:web_fetch_tool
+    timeout: 30
+
+# Use Kubernetes-based sandbox with provisioner
+sandbox:
+  use: src.community.aio_sandbox:AioSandboxProvider
+  provisioner_url: http://provisioner:8002
+  # Resource limits enforced by provisioner pod config
+
+subagents:
+  timeout_seconds: 1800  # 30 minutes for complex tasks
+  agents:
+    general-purpose:
+      timeout_seconds: 3600  # 1 hour for research
+    bash:
+      timeout_seconds: 600  # 10 minutes for commands
+
+skills:
+  container_path: /mnt/skills
+
+title:
+  enabled: true
+  max_words: 6
+  max_chars: 60
+  model_name: null
+
+# Aggressive summarization for long conversations
+summarization:
+  enabled: true
+  model_name: null
+  trigger:
+    - type: tokens
+      value: 50000  # Trigger earlier in production
+    - type: fraction
+      value: 0.7  # When 70% of context used
+  keep:
+    type: messages
+    value: 20  # Keep more recent messages
+  trim_tokens_to_summarize: 50000
+
+# Memory persistence
+memory:
+  enabled: true
+  storage_path: /mnt/shared/memory.json
+  debounce_seconds: 60
+  model_name: null
+  max_facts: 200
+  fact_confidence_threshold: 0.8  # Higher threshold
+  injection_enabled: true
+  max_injection_tokens: 3000
+```
+
+### Environment Variables
+
+Store sensitive data in secrets:
+
+```bash
+# API Keys (from secrets manager)
+OPENAI_API_KEY=secret-ref:openai-key
+ANTHROPIC_API_KEY=secret-ref:anthropic-key
+TAVILY_API_KEY=secret-ref:tavily-key
+
+# Application settings
+NODE_ENV=production
+CI=true
+
+# Logging
+LOG_LEVEL=INFO
+LOG_FORMAT=json
+
+# Monitoring
+ENABLE_METRICS=true
+METRICS_PORT=9090
+
+# Tracing (optional)
+OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+```
+
+## Container Images
+
+### Build Production Images
+
+#### Frontend Production Dockerfile
+
+Create `frontend/Dockerfile.prod`:
+
+```dockerfile
+# Build stage
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+# Install pnpm
+RUN corepack enable && corepack install -g pnpm@10.26.2
+
+# Copy package files
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile --prod=false
+
+# Copy source
+COPY frontend/ .
+
+# Build
+RUN pnpm run build
+
+# Production stage
+FROM node:22-alpine
+
+WORKDIR /app
+
+# Install pnpm
+RUN corepack enable && corepack install -g pnpm@10.26.2
+
+# Copy built assets and dependencies
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/node_modules ./node_modules
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nextjs -u 1001 && \
+    chown -R nextjs:nodejs /app
+
+USER nextjs
+
+EXPOSE 3000
+
+ENV NODE_ENV=production
+ENV PORT=3000
+
+CMD ["pnpm", "start"]
+```
+
+#### Backend Production Dockerfile
+
+Create `backend/Dockerfile.prod`:
+
+```dockerfile
+FROM python:3.12-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+WORKDIR /app
+
+# Copy backend
+COPY backend ./backend
+
+# Install production dependencies only
+RUN --mount=type=cache,target=/root/.cache/uv \
+    sh -c "cd backend && uv sync --no-dev"
+
+# Create non-root user
+RUN useradd -m -u 1001 deerflow && \
+    chown -R deerflow:deerflow /app
+
+USER deerflow
+
+EXPOSE 8001 2024
+
+ENV PYTHONUNBUFFERED=1
+
+# Multi-worker uvicorn for production
+CMD ["sh", "-c", "cd backend && uv run uvicorn src.gateway.app:app --host 0.0.0.0 --port 8001 --workers 4 --log-level info"]
+```
+
+### Build and Push
+
+```bash
+# Build images
+docker build -t your-registry/deer-flow-frontend:v2.0 -f frontend/Dockerfile.prod .
+docker build -t your-registry/deer-flow-backend:v2.0 -f backend/Dockerfile.prod .
+
+# Push to registry
+docker push your-registry/deer-flow-frontend:v2.0
+docker push your-registry/deer-flow-backend:v2.0
+
+# Tag as latest
+docker tag your-registry/deer-flow-frontend:v2.0 your-registry/deer-flow-frontend:latest
+docker tag your-registry/deer-flow-backend:v2.0 your-registry/deer-flow-backend:latest
+docker push your-registry/deer-flow-frontend:latest
+docker push your-registry/deer-flow-backend:latest
+```
+
+## Kubernetes Deployment
+
+### Namespace
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: deer-flow-prod
+  labels:
+    name: deer-flow-prod
+    environment: production
+```
+
+### Frontend Deployment
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: deer-flow-prod
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: deer-flow-frontend
+  template:
+    metadata:
+      labels:
+        app: deer-flow-frontend
+    spec:
+      containers:
+      - name: frontend
+        image: your-registry/deer-flow-frontend:v2.0
+        ports:
+        - containerPort: 3000
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: NEXT_PUBLIC_API_URL
+          value: "https://api.deerflow.example.com"
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - deer-flow-frontend
+              topologyKey: kubernetes.io/hostname
+```
+
+### Gateway Deployment
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: deer-flow-prod
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: deer-flow-gateway
+  template:
+    metadata:
+      labels:
+        app: deer-flow-gateway
+    spec:
+      containers:
+      - name: gateway
+        image: your-registry/deer-flow-backend:v2.0
+        command: ["sh", "-c"]
+        args:
+        - |
+          cd backend && 
+          uv run uvicorn src.gateway.app:app \
+            --host 0.0.0.0 --port 8001 \
+            --workers 4 \
+            --log-level info
+        ports:
+        - containerPort: 8001
+        env:
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: deer-flow-secrets
+              key: openai-api-key
+        volumeMounts:
+        - name: config
+          mountPath: /app/config.yaml
+          subPath: config.yaml
+        - name: shared-storage
+          mountPath: /mnt/shared
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 1Gi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 10
+          periodSeconds: 5
+      volumes:
+      - name: config
+        configMap:
+          name: deer-flow-config
+      - name: shared-storage
+        persistentVolumeClaim:
+          claimName: deer-flow-shared-pvc
+```
+
+### LangGraph Deployment
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langgraph
+  namespace: deer-flow-prod
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: deer-flow-langgraph
+  template:
+    metadata:
+      labels:
+        app: deer-flow-langgraph
+    spec:
+      containers:
+      - name: langgraph
+        image: your-registry/deer-flow-backend:v2.0
+        command: ["sh", "-c"]
+        args:
+        - |
+          cd backend && 
+          uv run langgraph start \
+            --host 0.0.0.0 --port 2024
+        ports:
+        - containerPort: 2024
+        env:
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: deer-flow-secrets
+              key: openai-api-key
+        volumeMounts:
+        - name: config
+          mountPath: /app/config.yaml
+          subPath: config.yaml
+        - name: shared-storage
+          mountPath: /mnt/shared
+        - name: threads
+          mountPath: /app/backend/.deer-flow
+        resources:
+          requests:
+            cpu: 2000m
+            memory: 2Gi
+          limits:
+            cpu: 4000m
+            memory: 4Gi
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 2024
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: config
+        configMap:
+          name: deer-flow-config
+      - name: shared-storage
+        persistentVolumeClaim:
+          claimName: deer-flow-shared-pvc
+      - name: threads
+        persistentVolumeClaim:
+          claimName: deer-flow-threads-pvc
+```
+
+### Services
+
+```yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: deer-flow-prod
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3000
+    targetPort: 3000
+  selector:
+    app: deer-flow-frontend
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: deer-flow-prod
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8001
+    targetPort: 8001
+  selector:
+    app: deer-flow-gateway
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langgraph
+  namespace: deer-flow-prod
+spec:
+  type: ClusterIP
+  ports:
+  - port: 2024
+    targetPort: 2024
+  selector:
+    app: deer-flow-langgraph
+```
+
+### Ingress
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: deer-flow-ingress
+  namespace: deer-flow-prod
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: 100m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+spec:
+  tls:
+  - hosts:
+    - deerflow.example.com
+    - api.deerflow.example.com
+    secretName: deer-flow-tls
+  rules:
+  - host: deerflow.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend
+            port:
+              number: 3000
+  - host: api.deerflow.example.com
+    http:
+      paths:
+      - path: /api/langgraph
+        pathType: Prefix
+        backend:
+          service:
+            name: langgraph
+            port:
+              number: 2024
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: gateway
+            port:
+              number: 8001
+```
+
+## Scaling
+
+### Horizontal Pod Autoscaler
+
+```yaml
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: frontend-hpa
+  namespace: deer-flow-prod
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: frontend
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gateway-hpa
+  namespace: deer-flow-prod
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gateway
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 75
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: langgraph-hpa
+  namespace: deer-flow-prod
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: langgraph
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 80
+```
+
+### Cluster Autoscaler
+
+Enable cluster autoscaler for node scaling:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-autoscaler
+  namespace: kube-system
+data:
+  min-nodes: "3"
+  max-nodes: "20"
+  scale-down-delay-after-add: "10m"
+  scale-down-unneeded-time: "10m"
+```
+
+## Monitoring
+
+### Prometheus ServiceMonitor
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: deer-flow-metrics
+  namespace: deer-flow-prod
+spec:
+  selector:
+    matchLabels:
+      app: deer-flow-gateway
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+```
+
+### Grafana Dashboard
+
+Key metrics to monitor:
+
+- **Request rate**: Requests per second
+- **Response time**: P50, P95, P99 latencies
+- **Error rate**: 4xx/5xx responses
+- **Active threads**: Number of agent threads
+- **Sandbox usage**: Active sandbox pods
+- **Resource utilization**: CPU, memory, disk
+- **Queue depth**: Pending agent tasks
+
+### Alerts
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: deer-flow-alerts
+  namespace: deer-flow-prod
+spec:
+  groups:
+  - name: deer-flow
+    interval: 30s
+    rules:
+    - alert: HighErrorRate
+      expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+      for: 5m
+      annotations:
+        summary: High error rate detected
+    
+    - alert: HighLatency
+      expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 5
+      for: 5m
+      annotations:
+        summary: High latency detected (P95 > 5s)
+    
+    - alert: PodCrashLooping
+      expr: rate(kube_pod_container_status_restarts_total[15m]) > 0
+      for: 5m
+      annotations:
+        summary: Pod is crash looping
+```
+
+## Security
+
+### Network Policies
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deer-flow-network-policy
+  namespace: deer-flow-prod
+spec:
+  podSelector:
+    matchLabels:
+      app: deer-flow-gateway
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: deer-flow-frontend
+    - podSelector:
+        matchLabels:
+          app: deer-flow-langgraph
+    ports:
+    - protocol: TCP
+      port: 8001
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: deer-flow-provisioner
+    ports:
+    - protocol: TCP
+      port: 8002
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443  # HTTPS for external APIs
+```
+
+### Pod Security Policy
+
+```yaml
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: deer-flow-psp
+spec:
+  privileged: false
+  allowPrivilegeEscalation: false
+  requiredDropCapabilities:
+  - ALL
+  runAsUser:
+    rule: MustRunAsNonRoot
+  seLinux:
+    rule: RunAsAny
+  fsGroup:
+    rule: RunAsAny
+  volumes:
+  - configMap
+  - secret
+  - persistentVolumeClaim
+  - emptyDir
+```
+
+### Secrets Management
+
+Use external secrets operator:
+
+```yaml
+apiVersion: external-secrets.io/v1beta1
+kind: SecretStore
+metadata:
+  name: aws-secrets-manager
+  namespace: deer-flow-prod
+spec:
+  provider:
+    aws:
+      service: SecretsManager
+      region: us-east-1
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: deer-flow-secrets
+  namespace: deer-flow-prod
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: SecretStore
+  target:
+    name: deer-flow-secrets
+    creationPolicy: Owner
+  data:
+  - secretKey: openai-api-key
+    remoteRef:
+      key: prod/deerflow/openai-api-key
+  - secretKey: anthropic-api-key
+    remoteRef:
+      key: prod/deerflow/anthropic-api-key
+```
+
+## Backup and Disaster Recovery
+
+### Velero Backup
+
+```bash
+# Install Velero
+velero install \
+  --provider aws \
+  --plugins velero/velero-plugin-for-aws:v1.9.0 \
+  --bucket deer-flow-backups \
+  --backup-location-config region=us-east-1 \
+  --snapshot-location-config region=us-east-1
+
+# Create backup schedule
+velero schedule create deer-flow-daily \
+  --schedule="0 2 * * *" \
+  --include-namespaces deer-flow-prod \
+  --ttl 720h0m0s
+
+# Manual backup
+velero backup create deer-flow-backup-$(date +%Y%m%d) \
+  --include-namespaces deer-flow-prod
+```
+
+### Thread Data Backup
+
+```bash
+#!/bin/bash
+# backup-threads.sh
+
+BACKUP_DIR="/backups/threads"
+THREADS_DIR="/mnt/shared/threads"
+RETENTION_DAYS=30
+
+# Create timestamped backup
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+tar -czf "${BACKUP_DIR}/threads-${TIMESTAMP}.tar.gz" "${THREADS_DIR}"
+
+# Upload to S3
+aws s3 cp "${BACKUP_DIR}/threads-${TIMESTAMP}.tar.gz" \
+  s3://deer-flow-backups/threads/
+
+# Clean old backups
+find "${BACKUP_DIR}" -name "threads-*.tar.gz" -mtime +${RETENTION_DAYS} -delete
+```
+
+### Restore Procedure
+
+```bash
+# Restore from Velero
+velero restore create --from-backup deer-flow-backup-20260304
+
+# Restore thread data
+aws s3 cp s3://deer-flow-backups/threads/threads-20260304-020000.tar.gz .
+tar -xzf threads-20260304-020000.tar.gz -C /mnt/shared/
+```
+
+## Performance Optimization
+
+### Caching
+
+1. **Redis for session state**:
+   ```yaml
+   env:
+   - name: REDIS_URL
+     value: redis://redis:6379/0
+   ```
+
+2. **CDN for static assets**:
+   - Cloudflare
+   - AWS CloudFront
+   - Fastly
+
+3. **Response caching**:
+   ```python
+   # In gateway app
+   from fastapi_cache import FastAPICache
+   from fastapi_cache.backends.redis import RedisBackend
+   
+   @app.on_event("startup")
+   async def startup():
+       redis = await aioredis.create_redis_pool("redis://redis:6379")
+       FastAPICache.init(RedisBackend(redis), prefix="deer-flow-cache")
+   ```
+
+### Database Optimization
+
+For checkpoint storage:
+
+```yaml
+# PostgreSQL for LangGraph checkpoints
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: deer-flow-prod
+spec:
+  ports:
+  - port: 5432
+  selector:
+    app: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: deer-flow-prod
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:16-alpine
+        env:
+        - name: POSTGRES_DB
+          value: deerflow
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: username
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: password
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 2Gi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-storage
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 100Gi
+```
+
+## Cost Optimization
+
+### Resource Right-sizing
+
+Monitor and adjust resource requests/limits:
+
+```bash
+# Analyze resource usage
+kubectl top pods -n deer-flow-prod
+
+# View recommendations
+kubectl describe vpa -n deer-flow-prod
+```
+
+### Spot Instances
+
+Use spot instances for sandbox pods:
+
+```yaml
+spec:
+  nodeSelector:
+    node.kubernetes.io/instance-type: spot
+  tolerations:
+  - key: spot
+    operator: Equal
+    value: "true"
+    effect: NoSchedule
+```
+
+### Storage Tiering
+
+```yaml
+# Hot data on SSD
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: deer-flow-hot-storage
+spec:
+  storageClassName: fast-ssd
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+
+# Cold data on HDD
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: deer-flow-cold-storage
+spec:
+  storageClassName: standard-hdd
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Ti
+```
+
+## Troubleshooting
+
+### Check Pod Status
+
+```bash
+kubectl get pods -n deer-flow-prod
+kubectl describe pod <pod-name> -n deer-flow-prod
+kubectl logs <pod-name> -n deer-flow-prod --tail=100 -f
+```
+
+### Check Resource Usage
+
+```bash
+kubectl top nodes
+kubectl top pods -n deer-flow-prod
+```
+
+### Debug Network Issues
+
+```bash
+# Test service connectivity
+kubectl run -it --rm debug --image=nicolaka/netshoot --restart=Never -- bash
+curl http://gateway:8001/health
+
+# Check network policies
+kubectl get networkpolicies -n deer-flow-prod
+```
+
+### Performance Profiling
+
+```bash
+# Enable profiling in gateway
+kubectl exec -it gateway-xxx -n deer-flow-prod -- bash
+cd backend
+uv run python -m cProfile -o profile.stats src/gateway/app.py
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Docker Deployment" icon="docker" href="/deployment/docker">
+    Learn about Docker-based deployment
+  </Card>
+  <Card title="Kubernetes Deployment" icon="dharmachakra" href="/deployment/kubernetes">
+    Deploy on Kubernetes with provisioner
+  </Card>
+</CardGroup>
+
+## See Also
+
+- [Configuration Guide](/configuration/overview) - Production configuration
+- [Security Best Practices](/security/overview) - Secure your deployment
+- [Monitoring Guide](/operations/monitoring) - Set up monitoring
+- [Backup Strategy](/operations/backup) - Backup and recovery

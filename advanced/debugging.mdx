@@ -1,0 +1,699 @@
+---
+title: Debugging Guide
+description: Debugging techniques, logging strategies, common issues, and development tools for troubleshooting DeerFlow
+---
+
+Effective debugging is essential for DeerFlow development. This guide covers debugging techniques, logging strategies, common issues, and tools to help troubleshoot problems.
+
+## Development Tools
+
+### Python Debugger (pdb)
+
+Use Python's built-in debugger for interactive debugging:
+
+```python
+# Add breakpoint in code
+import pdb; pdb.set_trace()
+
+# Or use Python 3.7+ breakpoint()
+breakpoint()
+```
+
+Common pdb commands:
+```
+n (next)       - Execute next line
+s (step)       - Step into function
+c (continue)   - Continue execution
+q (quit)       - Quit debugger
+l (list)       - Show code context
+p variable     - Print variable value
+pp variable    - Pretty-print variable
+w (where)      - Show stack trace
+u (up)         - Move up stack frame
+d (down)       - Move down stack frame
+```
+
+### IPython Debugger (ipdb)
+
+More powerful alternative to pdb:
+
+```bash
+# Install ipdb
+uv add --dev ipdb
+```
+
+```python
+# Use in code
+import ipdb; ipdb.set_trace()
+```
+
+Benefits over pdb:
+- Syntax highlighting
+- Tab completion
+- Better error messages
+- Command history
+
+### pytest Debugger Integration
+
+```bash
+# Drop into debugger on test failure
+PYTHONPATH=. uv run pytest tests/ --pdb
+
+# Stop at first failure and debug
+PYTHONPATH=. uv run pytest tests/ -x --pdb
+
+# Debug specific test
+PYTHONPATH=. uv run pytest tests/test_client.py::test_function --pdb
+```
+
+### Visual Studio Code Debugging
+
+Create `.vscode/launch.json`:
+
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: LangGraph Server",
+      "type": "python",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "src.gateway.app:app",
+        "--host", "0.0.0.0",
+        "--port", "8001",
+        "--reload"
+      ],
+      "cwd": "${workspaceFolder}/backend",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/backend"
+      }
+    },
+    {
+      "name": "Python: Test Current File",
+      "type": "python",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "${file}",
+        "-v",
+        "-s"
+      ],
+      "cwd": "${workspaceFolder}/backend",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/backend"
+      }
+    }
+  ]
+}
+```
+
+Set breakpoints by clicking in the gutter, then press F5 to start debugging.
+
+## Logging Strategies
+
+### Python Logging
+
+DeerFlow uses Python's `logging` module:
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Log levels (increasing severity)
+logger.debug("Detailed information for debugging")
+logger.info("General information about execution")
+logger.warning("Warning about potential issues")
+logger.error("Error occurred but execution continues")
+logger.exception("Error with full stack trace")
+```
+
+### Logging Best Practices
+
+**Include context in log messages**:
+
+```python
+# Good: Provides context
+logger.info(f"Loading model '{model_name}' for thread {thread_id}")
+logger.error(f"Failed to connect to sandbox {sandbox_id}: {error}")
+
+# Bad: Vague
+logger.info("Loading model")
+logger.error("Connection failed")
+```
+
+**Use appropriate log levels**:
+
+```python
+# DEBUG: Detailed diagnostic information
+logger.debug(f"Middleware chain: {[m.__class__.__name__ for m in middlewares]}")
+
+# INFO: General operational information
+logger.info(f"Agent created with {len(tools)} tools")
+
+# WARNING: Unexpected but handled situations
+logger.warning(f"Memory file not found, creating new: {memory_path}")
+
+# ERROR: Errors that don't prevent execution
+logger.error(f"Failed to load MCP server '{name}': {error}")
+
+# EXCEPTION: Errors with full traceback
+try:
+    result = process_request()
+except Exception as e:
+    logger.exception(f"Request processing failed: {e}")
+    raise
+```
+
+**Log at entry and exit points**:
+
+```python
+def process_conversation(thread_id: str, message: str) -> str:
+    logger.info(f"Processing conversation for thread {thread_id}")
+    
+    try:
+        result = agent.invoke({"messages": [message]})
+        logger.info(f"Conversation processed successfully: {len(result)} tokens")
+        return result
+    except Exception as e:
+        logger.exception(f"Conversation processing failed for thread {thread_id}")
+        raise
+```
+
+### Viewing Logs
+
+**Docker Development**:
+
+```bash
+# View all service logs
+make docker-logs
+
+# View specific service logs
+make docker-logs-frontend
+make docker-logs-gateway
+
+# Follow logs in real-time
+docker-compose -f docker/docker-compose-dev.yaml logs -f
+
+# View logs for specific service
+docker-compose -f docker/docker-compose-dev.yaml logs -f api
+```
+
+**Local Development**:
+
+Logs appear in the terminal where you started the service:
+
+```bash
+# Terminal 1: LangGraph server logs
+cd backend
+make dev
+
+# Terminal 2: Gateway API logs
+cd backend
+make gateway
+```
+
+### Log Configuration
+
+Configure logging level:
+
+```python
+import logging
+
+# Set global log level
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# Set level for specific module
+logging.getLogger('src.agents').setLevel(logging.DEBUG)
+logging.getLogger('src.sandbox').setLevel(logging.WARNING)
+```
+
+Or use environment variable:
+
+```bash
+# More verbose logging
+export LOG_LEVEL=DEBUG
+
+# Less verbose logging
+export LOG_LEVEL=WARNING
+```
+
+## Common Issues and Solutions
+
+### Backend Issues
+
+#### Issue: Import Errors
+
+**Symptom**: `ModuleNotFoundError` or `ImportError`
+
+**Causes**:
+- Missing dependencies
+- Incorrect PYTHONPATH
+- Circular imports
+
+**Solutions**:
+
+```bash
+# Reinstall dependencies
+cd backend
+make install
+
+# Run with correct PYTHONPATH
+PYTHONPATH=. uv run python src/script.py
+
+# For tests
+PYTHONPATH=. uv run pytest tests/
+```
+
+For circular imports, check `backend/tests/conftest.py` for mocking patterns.
+
+#### Issue: Configuration Not Found
+
+**Symptom**: `FileNotFoundError: config.yaml`
+
+**Causes**:
+- Config file in wrong location
+- Environment variable not set
+
+**Solutions**:
+
+```bash
+# Create config from example
+cp config.example.yaml config.yaml
+
+# Set custom config path
+export DEER_FLOW_CONFIG_PATH=/path/to/config.yaml
+
+# Verify config location
+ls -la config.yaml
+```
+
+Config search order:
+1. Explicit `config_path` parameter
+2. `DEER_FLOW_CONFIG_PATH` environment variable
+3. `config.yaml` in current directory (backend/)
+4. `config.yaml` in parent directory (project root)
+
+#### Issue: Model Provider Not Found
+
+**Symptom**: `ModuleNotFoundError: No module named 'langchain_anthropic'`
+
+**Cause**: Provider package not installed
+
+**Solution**:
+
+```bash
+# Install provider package
+cd backend
+uv add langchain-anthropic
+
+# For other providers
+uv add langchain-google-genai
+uv add langchain-openai
+```
+
+The error message now includes install guidance:
+```
+Error loading model provider: No module named 'langchain_anthropic'
+Install with: uv add langchain-anthropic
+```
+
+#### Issue: Sandbox Execution Fails
+
+**Symptom**: `SandboxError` or command execution fails
+
+**Causes**:
+- Docker not running (for AIO sandbox)
+- Permission issues
+- Virtual path mapping errors
+
+**Debug steps**:
+
+```python
+# Check sandbox mode
+from src.sandbox import is_local_sandbox
+
+print(f"Local sandbox: {is_local_sandbox(state.sandbox)}")
+
+# Test sandbox execution
+result = sandbox.execute_command("echo 'test'")
+print(f"Result: {result}")
+
+# Check path mapping
+from src.sandbox.local import replace_virtual_path
+
+virtual = "/mnt/user-data/workspace/file.txt"
+physical = replace_virtual_path(virtual, thread_id)
+print(f"{virtual} -> {physical}")
+```
+
+#### Issue: MCP Server Connection Fails
+
+**Symptom**: MCP tools not available or connection errors
+
+**Debug steps**:
+
+```bash
+# Check MCP configuration
+cat extensions_config.json
+
+# Test MCP server manually
+npx -y @modelcontextprotocol/server-github
+
+# Check environment variables
+echo $GITHUB_TOKEN
+
+# View MCP client logs
+# Enable debug logging in code
+import logging
+logging.getLogger('src.mcp').setLevel(logging.DEBUG)
+```
+
+**Common fixes**:
+- Verify server command is correct
+- Check environment variables are set
+- Ensure server is enabled in config
+- Test server independently
+
+### Frontend Issues
+
+#### Issue: API Connection Fails
+
+**Symptom**: Frontend can't reach backend APIs
+
+**Debug steps**:
+
+```bash
+# Check backend is running
+curl http://localhost:2024/health
+curl http://localhost:8001/health
+
+# Check nginx is running
+curl http://localhost:2026/api/models
+
+# View browser network tab
+# Look for CORS errors or 404s
+```
+
+**Solutions**:
+- Ensure all services are running
+- Check nginx configuration
+- Verify API base URLs in frontend .env
+- Clear browser cache
+
+#### Issue: WebSocket/SSE Connection Drops
+
+**Symptom**: Streaming responses don't work
+
+**Causes**:
+- Nginx timeout too short
+- Network proxy interfering
+- Browser tab suspended
+
+**Solutions**:
+
+Check nginx timeouts in `docker/nginx/nginx.conf`:
+```nginx
+proxy_read_timeout 300s;
+proxy_send_timeout 300s;
+```
+
+Test SSE endpoint:
+```bash
+curl -N http://localhost:2026/api/langgraph/threads/test/stream
+```
+
+### Docker Issues
+
+#### Issue: Docker Services Won't Start
+
+**Symptom**: `docker-compose up` fails
+
+**Debug steps**:
+
+```bash
+# Check Docker is running
+docker info
+
+# View detailed error
+docker-compose -f docker/docker-compose-dev.yaml up --no-start
+docker-compose -f docker/docker-compose-dev.yaml logs
+
+# Check port conflicts
+lsof -i :2026
+lsof -i :3000
+lsof -i :8001
+lsof -i :2024
+```
+
+**Solutions**:
+- Start Docker Desktop
+- Stop services using required ports
+- Rebuild images: `docker-compose build --no-cache`
+- Remove old containers: `docker-compose down -v`
+
+#### Issue: Hot Reload Not Working
+
+**Symptom**: Code changes don't trigger reload
+
+**Causes**:
+- Volume mounting issues
+- File watchers not working
+
+**Solutions**:
+
+```bash
+# Restart services
+make docker-stop
+make docker-start
+
+# Check volume mounts
+docker-compose -f docker/docker-compose-dev.yaml config
+
+# For backend, check --reload flag
+# For frontend, check pnpm dev is running
+```
+
+### Test Issues
+
+#### Issue: Tests Fail Locally but Pass in CI
+
+**Causes**:
+- Environment differences
+- Leftover test artifacts
+- Different Python versions
+
+**Solutions**:
+
+```bash
+# Clean test artifacts
+find . -type d -name "__pycache__" -exec rm -rf {} +
+find . -type d -name ".pytest_cache" -exec rm -rf {} +
+
+# Recreate virtual environment
+cd backend
+rm -rf .venv
+make install
+
+# Run tests with same Python version as CI (3.12)
+python --version
+```
+
+#### Issue: Tests Fail Due to Circular Imports
+
+**Symptom**: `ImportError` when running tests
+
+**Solution**: Add module mock to `backend/tests/conftest.py`
+
+```python
+import sys
+from unittest.mock import MagicMock
+
+# Mock problematic module
+_module_mock = MagicMock()
+sys.modules["src.problematic.module"] = _module_mock
+```
+
+See existing mocks in conftest.py for examples.
+
+## Debugging Techniques
+
+### Print Debugging
+
+Simple but effective:
+
+```python
+# Print variables
+print(f"Thread ID: {thread_id}")
+print(f"Message count: {len(messages)}")
+
+# Print types
+print(f"Type: {type(result)}")
+print(f"Dir: {dir(result)}")
+
+# Print with context
+print(f"\n=== Before processing ===")
+print(f"State: {state}")
+process(state)
+print(f"\n=== After processing ===")
+print(f"State: {state}")
+```
+
+Remember to remove print statements before committing!
+
+### Assertion Debugging
+
+Use assertions to verify assumptions:
+
+```python
+# Verify type
+assert isinstance(result, dict), f"Expected dict, got {type(result)}"
+
+# Verify value range
+assert 0 <= confidence <= 1, f"Invalid confidence: {confidence}"
+
+# Verify state
+assert state.sandbox is not None, "Sandbox not initialized"
+```
+
+Assertions help catch bugs early and document expectations.
+
+### Logging Debugging
+
+Add temporary debug logs:
+
+```python
+import logging
+logger = logging.getLogger(__name__)
+
+# Temporarily increase verbosity
+logger.setLevel(logging.DEBUG)
+
+logger.debug(f"Processing with config: {config}")
+logger.debug(f"Middleware chain: {middlewares}")
+logger.debug(f"Result: {result}")
+```
+
+### Stack Trace Analysis
+
+When errors occur, read the stack trace carefully:
+
+```python
+Traceback (most recent call last):
+  File "src/agents/lead_agent/agent.py", line 145, in process
+    result = middleware.process(state)
+  File "src/agents/middlewares/sandbox.py", line 67, in process
+    sandbox = provider.acquire(thread_id)
+  File "src/sandbox/local.py", line 89, in acquire
+    self._create_directories(thread_id)
+  File "src/sandbox/local.py", line 102, in _create_directories
+    workspace_dir.mkdir(parents=True, exist_ok=False)
+FileExistsError: [Errno 17] File exists: '/path/to/workspace'
+```
+
+Read from bottom to top:
+1. **Bottom**: Actual error - directory already exists
+2. **Middle**: Context - creating directories for sandbox
+3. **Top**: Entry point - processing agent request
+
+### Bisecting Issues
+
+For complex bugs, use binary search:
+
+1. Identify working state (commit, version)
+2. Identify broken state
+3. Test midpoint
+4. Repeat until you find the breaking change
+
+```bash
+# Git bisect for finding breaking commit
+git bisect start
+git bisect bad HEAD
+git bisect good v1.0.0
+
+# Test current state
+make test
+
+# Mark as good or bad
+git bisect good  # or: git bisect bad
+
+# Continue until found
+git bisect reset
+```
+
+### Rubber Duck Debugging
+
+Explain the problem out loud (to a rubber duck, colleague, or yourself):
+
+1. Describe what you expect to happen
+2. Describe what actually happens
+3. Walk through the code step by step
+4. Often you'll spot the issue while explaining!
+
+## Performance Debugging
+
+### Profiling Python Code
+
+```python
+import cProfile
+import pstats
+
+# Profile a function
+profiler = cProfile.Profile()
+profiler.enable()
+
+result = slow_function()
+
+profiler.disable()
+stats = pstats.Stats(profiler)
+stats.sort_stats('cumulative')
+stats.print_stats(20)  # Show top 20
+```
+
+### Timing Code Execution
+
+```python
+import time
+
+start = time.time()
+result = operation()
+elapsed = time.time() - start
+
+logger.info(f"Operation took {elapsed:.2f}s")
+```
+
+### Memory Debugging
+
+```python
+import sys
+
+# Check object size
+size = sys.getsizeof(large_object)
+logger.info(f"Object size: {size / 1024 / 1024:.2f} MB")
+
+# Track memory usage
+import tracemalloc
+
+tracemalloc.start()
+
+# ... code to analyze ...
+
+current, peak = tracemalloc.get_traced_memory()
+logger.info(f"Current: {current / 1024 / 1024:.2f} MB")
+logger.info(f"Peak: {peak / 1024 / 1024:.2f} MB")
+
+tracemalloc.stop()
+```
+
+## Resources
+
+- [Python Debugging Guide](https://docs.python.org/3/library/debug.html)
+- [pytest Documentation](https://docs.pytest.org/)
+- [Python Logging HOWTO](https://docs.python.org/3/howto/logging.html)
+- [VS Code Python Debugging](https://code.visualstudio.com/docs/python/debugging)
+- [Docker Debugging Tips](https://docs.docker.com/config/containers/logging/)

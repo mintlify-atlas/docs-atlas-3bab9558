@@ -1,0 +1,183 @@
+---
+title: "Chat Method"
+description: "Send a message and receive a complete response"
+icon: "message"
+---
+
+## Overview
+
+The `chat()` method sends a message and returns the final text response. It's a convenience wrapper around `stream()` that returns only the last AI text from messages-tuple events.
+
+```python
+response = client.chat("What is 7 * 8?", thread_id="my-thread")
+print(response)  # "56"
+```
+
+## Method Signature
+
+```python
+def chat(
+    self,
+    message: str,
+    *,
+    thread_id: str | None = None,
+    **kwargs
+) -> str
+```
+
+## Parameters
+
+<ParamField path="message" type="str" required>
+  User message text to send to the agent.
+</ParamField>
+
+<ParamField path="thread_id" type="str | None" default="None">
+  Thread ID for conversation context. Auto-generated if None.
+  
+  <Warning>
+  Without a checkpointer at initialization, thread_id is only used for file isolation (uploads/artifacts), not conversation history.
+  </Warning>
+</ParamField>
+
+<ParamField path="model_name" type="str" default="client default">
+  Override the model for this specific call.
+</ParamField>
+
+<ParamField path="thinking_enabled" type="bool" default="client default">
+  Override thinking mode for this call.
+</ParamField>
+
+<ParamField path="plan_mode" type="bool" default="client default">
+  Override plan mode for this call.
+</ParamField>
+
+<ParamField path="subagent_enabled" type="bool" default="client default">
+  Override subagent delegation for this call.
+</ParamField>
+
+<ParamField path="recursion_limit" type="int" default="100">
+  Maximum number of agent steps per turn.
+</ParamField>
+
+## Return Value
+
+<ResponseField name="response" type="str">
+  The last AI message text, or empty string if no response was generated.
+</ResponseField>
+
+## Examples
+
+### Basic Usage
+
+```python
+from src.client import DeerFlowClient
+
+client = DeerFlowClient()
+response = client.chat("hello")
+print(response)
+```
+
+### With Thread ID
+
+```python
+response = client.chat(
+    "Analyze this data",
+    thread_id="analysis-session-1"
+)
+```
+
+### Override Model
+
+```python
+response = client.chat(
+    "Complex reasoning task",
+    model_name="claude-3-opus",
+    thinking_enabled=True
+)
+```
+
+### Multi-Turn Conversation
+
+```python
+from langgraph.checkpoint.memory import MemorySaver
+
+# Initialize with checkpointer for conversation history
+client = DeerFlowClient(checkpointer=MemorySaver())
+
+thread_id = "conversation-1"
+
+# First turn
+response1 = client.chat("My name is Alice", thread_id=thread_id)
+print(response1)  # "Nice to meet you, Alice!"
+
+# Second turn - context preserved
+response2 = client.chat("What's my name?", thread_id=thread_id)
+print(response2)  # "Your name is Alice."
+```
+
+## Behavior Notes
+
+<Note>
+If the agent emits multiple text segments in one turn, intermediate segments are discarded. Use `stream()` directly to capture all events.
+</Note>
+
+### Example: Multiple AI Messages
+
+If the agent produces:
+1. "Let me think about this..."
+2. "I'll use a tool to help."
+3. "The final answer is 42."
+
+The `chat()` method will return only: **"The final answer is 42."**
+
+To see all intermediate messages, use `stream()` instead:
+
+```python
+for event in client.stream("What is the meaning of life?"):
+    if event.type == "messages-tuple" and event.data.get("type") == "ai":
+        print(event.data.get("content"))
+```
+
+## Error Handling
+
+```python
+try:
+    response = client.chat("Hello", thread_id="test")
+except Exception as e:
+    print(f"Error: {e}")
+```
+
+Common errors:
+- Configuration errors (missing API keys, invalid model names)
+- Network errors (when using cloud models)
+- Tool execution errors (file not found, permission denied)
+
+## Testing
+
+From the test suite:
+
+```python
+def test_returns_last_message(self, client):
+    """chat() returns the last AI message text."""
+    ai1 = AIMessage(content="thinking...", id="ai-1")
+    ai2 = AIMessage(content="final answer", id="ai-2")
+    chunks = [
+        {"messages": [HumanMessage(content="q", id="h-1"), ai1]},
+        {"messages": [HumanMessage(content="q", id="h-1"), ai1, ai2]},
+    ]
+    agent = _make_agent_mock(chunks)
+
+    with (
+        patch.object(client, "_ensure_agent"),
+        patch.object(client, "_agent", agent),
+    ):
+        result = client.chat("q", thread_id="t6")
+
+    assert result == "final answer"
+```
+
+## See Also
+
+- [Streaming](/api/python-client/streaming) - For real-time event streaming
+- [Configuration](/api/python-client/configuration) - For file uploads and model selection
+- [Overview](/api/python-client/overview) - For initialization options

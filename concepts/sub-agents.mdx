@@ -1,0 +1,452 @@
+---
+title: Sub-agents
+description: Delegate complex tasks to specialized sub-agents
+---
+
+Sub-agents enable the lead agent to delegate complex, multi-step tasks to specialized agents that run in parallel or sequentially.
+
+## Overview
+
+Complex tasks rarely fit in a single pass. The lead agent can spawn sub-agents on the fly to:
+- Research multiple topics concurrently
+- Execute specialized workflows in parallel
+- Handle time-consuming operations asynchronously
+- Isolate context for focused sub-tasks
+
+**Example Flow**:
+```
+User: "Research the top 5 AI frameworks and create a comparison report"
+
+Lead Agent:
+  ├── Sub-agent 1: Research TensorFlow
+  ├── Sub-agent 2: Research PyTorch
+  ├── Sub-agent 3: Research JAX
+  ├── Sub-agent 4: Research scikit-learn
+  └── Sub-agent 5: Research Hugging Face Transformers
+  
+  (All run in parallel)
+  
+  Results combined → Comparison report generated
+```
+
+## The `task()` Tool
+
+Sub-agents are spawned via the `task()` tool:
+
+```python
+task(
+    description="Research TensorFlow",
+    prompt="Research TensorFlow's architecture, key features, and use cases",
+    subagent_type="general-purpose",
+    max_turns=20
+)
+```
+
+### Parameters
+
+<ParamField path="description" type="string" required>
+  Brief task summary (shown in UI)
+</ParamField>
+
+<ParamField path="prompt" type="string" required>
+  Detailed instructions for the sub-agent
+</ParamField>
+
+<ParamField path="subagent_type" type="string" default="general-purpose">
+  Type of sub-agent to use: `general-purpose` or `bash`
+</ParamField>
+
+<ParamField path="max_turns" type="integer" default="20">
+  Maximum conversation turns (prevents infinite loops)
+</ParamField>
+
+## Sub-agent Types
+
+DeerFlow includes two built-in sub-agent types:
+
+<Tabs>
+  <Tab title="general-purpose">
+    **Description**: Full-capability agent with all tools except `task()`
+    
+    **Tools**:
+    - Sandbox tools (bash, read_file, write_file, etc.)
+    - Research tools (web_search, web_fetch)
+    - Built-in tools (present_files, ask_clarification)
+    - Skills access
+    - Memory access
+    
+    **Use Cases**:
+    - Research tasks
+    - Code generation
+    - Data analysis
+    - Content creation
+    
+    **Example**:
+    ```python
+    task(
+        description="Analyze sales data",
+        prompt="Analyze Q4 sales data and create visualizations",
+        subagent_type="general-purpose"
+    )
+    ```
+  </Tab>
+  
+  <Tab title="bash">
+    **Description**: Command specialist with bash focus
+    
+    **Tools**:
+    - bash (primary)
+    - read_file
+    - write_file
+    - ls
+    
+    **Use Cases**:
+    - System administration tasks
+    - File operations
+    - Script execution
+    - Environment setup
+    
+    **Example**:
+    ```python
+    task(
+        description="Set up Python environment",
+        prompt="Install required Python packages and verify setup",
+        subagent_type="bash"
+    )
+    ```
+  </Tab>
+</Tabs>
+
+## Concurrency Limits
+
+DeerFlow enforces a maximum of **3 concurrent sub-agents** to prevent resource exhaustion.
+
+**Enforcement**: The `SubagentLimitMiddleware` truncates excess `task()` calls:
+
+```python
+class SubagentLimitMiddleware:
+    async def after_model(self, state: ThreadState):
+        task_calls = [msg for msg in state["messages"] 
+                      if isinstance(msg, AIMessage) and msg.tool_calls]
+        
+        if len(task_calls) > MAX_CONCURRENT_SUBAGENTS:
+            # Truncate excess calls
+            state["messages"][-1].tool_calls = task_calls[:3]
+```
+
+<Info>
+  If the agent requests more than 3 sub-agents, only the first 3 are executed.
+</Info>
+
+## Execution Flow
+
+### 1. Task Submission
+
+The lead agent calls `task()`:
+
+```python
+result = task(
+    description="Research topic",
+    prompt="Research AI safety techniques",
+    subagent_type="general-purpose"
+)
+```
+
+### 2. Background Execution
+
+The task is submitted to `SubagentExecutor`:
+
+```python
+class SubagentExecutor:
+    def __init__(self):
+        self._scheduler_pool = ThreadPoolExecutor(max_workers=3)
+        self._execution_pool = ThreadPoolExecutor(max_workers=3)
+    
+    def execute_task(self, task_id, prompt, subagent_type):
+        # Submit to execution pool
+        future = self._execution_pool.submit(
+            self._run_subagent,
+            task_id,
+            prompt,
+            subagent_type
+        )
+        return future
+```
+
+### 3. Progress Events
+
+The sub-agent emits events during execution:
+
+```json
+{
+  "type": "task_started",
+  "task_id": "abc123",
+  "description": "Research AI safety"
+}
+
+{
+  "type": "task_running",
+  "task_id": "abc123",
+  "progress": "Searching web for AI safety papers..."
+}
+
+{
+  "type": "task_completed",
+  "task_id": "abc123",
+  "result": "AI safety involves..."
+}
+```
+
+### 4. Result Collection
+
+The lead agent receives results:
+
+```json
+{
+  "task_id": "abc123",
+  "status": "completed",
+  "result": "Comprehensive research findings...",
+  "artifacts": [
+    {
+      "path": "/mnt/user-data/outputs/ai-safety-report.md",
+      "type": "markdown"
+    }
+  ]
+}
+```
+
+## Context Isolation
+
+Each sub-agent runs in its own isolated context:
+
+**Isolated**:
+- Conversation history
+- Tool call history
+- Intermediate results
+
+**Shared**:
+- Sandbox filesystem
+- Thread data directory
+- Skills access
+- Memory (read-only)
+
+<Warning>
+  Sub-agents cannot see the lead agent's conversation or other sub-agents' contexts.
+</Warning>
+
+## Timeout Handling
+
+Sub-agents have a 15-minute timeout:
+
+```python
+TASK_TIMEOUT_SECONDS = 900  # 15 minutes
+
+try:
+    result = future.result(timeout=TASK_TIMEOUT_SECONDS)
+except TimeoutError:
+    return {
+        "status": "timed_out",
+        "error": "Task exceeded 15 minute limit"
+    }
+```
+
+**Best Practice**: Break long tasks into smaller sub-tasks.
+
+## Parallel vs Sequential
+
+### Parallel Execution
+
+Multiple `task()` calls in a single response run concurrently:
+
+```python
+# Lead agent's single response
+task(description="Research Python", prompt="...", subagent_type="general-purpose")
+task(description="Research Go", prompt="...", subagent_type="general-purpose")
+task(description="Research Rust", prompt="...", subagent_type="general-purpose")
+
+# All 3 run simultaneously
+```
+
+### Sequential Execution
+
+Wait for results between calls:
+
+```python
+# Turn 1
+task(description="Research market", prompt="...", subagent_type="general-purpose")
+# Wait for result
+
+# Turn 2 (after receiving market research)
+task(description="Create proposal", prompt="Based on research: ...", subagent_type="general-purpose")
+# Wait for result
+
+# Turn 3
+task(description="Generate slides", prompt="Based on proposal: ...", subagent_type="general-purpose")
+```
+
+## Error Handling
+
+Sub-agents can fail in several ways:
+
+<AccordionGroup>
+  <Accordion title="Task failed">
+    The sub-agent encountered an error during execution:
+    
+    ```json
+    {
+      "status": "failed",
+      "error": "FileNotFoundError: data.csv not found"
+    }
+    ```
+    
+    **Action**: Retry with corrected prompt or handle the error.
+  </Accordion>
+  
+  <Accordion title="Task timed out">
+    The sub-agent exceeded the 15-minute limit:
+    
+    ```json
+    {
+      "status": "timed_out",
+      "error": "Task exceeded timeout"
+    }
+    ```
+    
+    **Action**: Break the task into smaller sub-tasks.
+  </Accordion>
+  
+  <Accordion title="Concurrency limit">
+    More than 3 sub-agents requested:
+    
+    ```json
+    {
+      "status": "rejected",
+      "error": "Maximum 3 concurrent sub-agents"
+    }
+    ```
+    
+    **Action**: Wait for existing tasks to complete.
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use clear, specific prompts">
+    Sub-agents work better with detailed instructions:
+    
+    ✅ **Good**: "Research PyTorch's distributed training capabilities, focusing on DDP and FSDP. Include code examples and performance benchmarks."
+    
+    ❌ **Bad**: "Research PyTorch"
+  </Accordion>
+  
+  <Accordion title="Leverage parallelism">
+    When tasks are independent, run them concurrently:
+    
+    ```python
+    # Parallel (fast)
+    task(description="Research A", ...)
+    task(description="Research B", ...)
+    task(description="Research C", ...)
+    ```
+  </Accordion>
+  
+  <Accordion title="Share files via filesystem">
+    Sub-agents share the same sandbox filesystem:
+    
+    ```python
+    # Sub-agent 1 writes file
+    write_file("/mnt/user-data/workspace/data.json", ...)
+    
+    # Sub-agent 2 reads file
+    read_file("/mnt/user-data/workspace/data.json")
+    ```
+  </Accordion>
+  
+  <Accordion title="Set appropriate max_turns">
+    Limit turns based on task complexity:
+    
+    - Simple tasks: `max_turns=5`
+    - Medium tasks: `max_turns=20` (default)
+    - Complex tasks: `max_turns=50`
+  </Accordion>
+</AccordionGroup>
+
+## Use Cases
+
+### Research Aggregation
+
+```python
+# Spawn multiple research sub-agents
+for topic in ["AI", "ML", "DL", "NLP", "CV"]:
+    task(
+        description=f"Research {topic}",
+        prompt=f"Research {topic} trends, tools, and papers",
+        subagent_type="general-purpose",
+        max_turns=15
+    )
+
+# Aggregate results into report
+```
+
+### Multi-Step Workflow
+
+```python
+# Step 1: Data collection
+task(
+    description="Collect data",
+    prompt="Scrape data from sources A, B, C",
+    subagent_type="general-purpose"
+)
+
+# Step 2: Analysis (after data collected)
+task(
+    description="Analyze data",
+    prompt="Analyze collected data and generate insights",
+    subagent_type="general-purpose"
+)
+
+# Step 3: Visualization
+task(
+    description="Create charts",
+    prompt="Create visualizations from analysis",
+    subagent_type="general-purpose"
+)
+```
+
+### Specialized Tasks
+
+```python
+# Environment setup with bash specialist
+task(
+    description="Setup environment",
+    prompt="Install Python 3.11, create venv, install requirements.txt",
+    subagent_type="bash",
+    max_turns=10
+)
+
+# Code generation with general-purpose
+task(
+    description="Generate API client",
+    prompt="Create a Python API client for the REST API",
+    subagent_type="general-purpose",
+    max_turns=30
+)
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Sub-agent Tool API" icon="code" href="/api/tools/sub-agents">
+    Complete task() tool reference
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/overview">
+    Configure sub-agent behavior
+  </Card>
+  <Card title="Sandbox" icon="box" href="/concepts/sandbox">
+    Understand shared filesystem
+  </Card>
+  <Card title="Context Engineering" icon="brain" href="/advanced/context-engineering">
+    Learn about context isolation
+  </Card>
+</CardGroup>

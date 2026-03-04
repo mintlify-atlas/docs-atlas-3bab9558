@@ -1,0 +1,547 @@
+---
+title: Testing Guide
+description: Comprehensive guide to test-driven development, running tests, and writing effective tests for DeerFlow
+---
+
+DeerFlow follows strict test-driven development practices. Every new feature and bug fix must be accompanied by comprehensive unit tests.
+
+## Test-Driven Development (TDD)
+
+### Mandatory Testing Policy
+
+**Every new feature or bug fix MUST be accompanied by unit tests. No exceptions.**
+
+This policy ensures:
+- Code quality and reliability
+- Prevention of regressions
+- Documentation through tests
+- Easier refactoring and maintenance
+
+### TDD Workflow
+
+1. **Write Test First**: Write failing test that describes desired behavior
+2. **Implement Feature**: Write minimal code to make test pass
+3. **Refactor**: Improve code while keeping tests passing
+4. **Repeat**: Continue cycle for each new feature or fix
+
+## Running Tests
+
+### Backend Tests
+
+From the `backend/` directory:
+
+```bash
+# Run all tests
+make test
+
+# Run all tests with verbose output
+PYTHONPATH=. uv run pytest tests/ -v
+
+# Run specific test file
+PYTHONPATH=. uv run pytest tests/test_client.py -v
+
+# Run specific test class
+PYTHONPATH=. uv run pytest tests/test_client.py::TestClientInit -v
+
+# Run specific test method
+PYTHONPATH=. uv run pytest tests/test_client.py::TestClientInit::test_default_params -v
+
+# Run tests matching a pattern
+PYTHONPATH=. uv run pytest tests/ -k "test_provisioner" -v
+
+# Run tests with coverage report
+PYTHONPATH=. uv run pytest tests/ --cov=src --cov-report=html
+```
+
+### Frontend Tests
+
+From the `frontend/` directory:
+
+```bash
+# Run all tests
+pnpm test
+
+# Run tests in watch mode
+pnpm test:watch
+
+# Run tests with coverage
+pnpm test:coverage
+```
+
+### CI/CD Tests
+
+Every pull request automatically runs:
+- All backend unit tests
+- Backend regression tests:
+  - `tests/test_provisioner_kubeconfig.py`
+  - `tests/test_docker_sandbox_mode_detection.py`
+- Linting checks
+- Type checking
+
+See `.github/workflows/backend-unit-tests.yml` for the full CI configuration.
+
+## Test Structure
+
+### Directory Organization
+
+```
+backend/tests/
+├── conftest.py                           # Shared fixtures and configuration
+├── test_client.py                        # DeerFlowClient tests (77 tests)
+├── test_client_live.py                   # Live integration tests
+├── test_provisioner_kubeconfig.py        # Provisioner regression tests
+├── test_docker_sandbox_mode_detection.py # Docker mode detection tests
+├── test_uploads_router.py                # Upload endpoint tests
+├── test_title_middleware_core_logic.py   # Title generation tests
+├── test_title_generation.py              # Title generation integration tests
+├── test_task_tool_core_logic.py          # Subagent task tool tests
+├── test_subagent_timeout_config.py       # Subagent timeout tests
+├── test_skills_loader.py                 # Skills system tests
+├── test_reflection_resolvers.py          # Dynamic module loading tests
+├── test_readability.py                   # Content extraction tests
+├── test_mcp_oauth.py                     # MCP OAuth tests
+├── test_mcp_client_config.py             # MCP client configuration tests
+├── test_lead_agent_model_resolution.py   # Model factory tests
+└── test_custom_agent.py                  # Custom agent tests
+```
+
+### Test Naming Convention
+
+- Test files: `test_<feature>.py`
+- Test classes: `TestFeatureName` or `Test<Component><Aspect>`
+- Test methods: `test_<behavior_being_tested>`
+
+Examples:
+```python
+# Good test names
+test_default_params()
+test_custom_config_path()
+test_wait_for_kubeconfig_rejects_directory()
+test_detect_mode_defaults_to_local_when_config_missing()
+
+# Bad test names
+test_1()
+test_config()
+test_client()
+```
+
+### Test File Structure
+
+```python
+"""Tests for <feature description>."""
+
+import pytest
+from unittest.mock import MagicMock, patch
+
+from src.module import FeatureClass
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def mock_config():
+    """Provide a minimal config mock."""
+    config = MagicMock()
+    config.some_value = "test"
+    return config
+
+@pytest.fixture
+def feature_instance(mock_config):
+    """Create a FeatureClass instance with mocked dependencies."""
+    with patch("src.module.dependency", return_value=mock_config):
+        return FeatureClass()
+
+# ---------------------------------------------------------------------------
+# Test Class: Initialization
+# ---------------------------------------------------------------------------
+
+class TestFeatureInit:
+    def test_default_params(self, feature_instance):
+        assert feature_instance.param is None
+    
+    def test_custom_params(self):
+        instance = FeatureClass(param="custom")
+        assert instance.param == "custom"
+
+# ---------------------------------------------------------------------------
+# Test Class: Core Functionality
+# ---------------------------------------------------------------------------
+
+class TestFeatureFunctionality:
+    def test_basic_operation(self, feature_instance):
+        result = feature_instance.do_something()
+        assert result == "expected"
+    
+    def test_error_handling(self, feature_instance):
+        with pytest.raises(ValueError, match="error message"):
+            feature_instance.do_invalid_thing()
+```
+
+## Writing Effective Tests
+
+### Unit Test Best Practices
+
+#### 1. Test One Thing at a Time
+
+```python
+# Good: Focused test
+def test_config_loads_from_file():
+    config = load_config("config.yaml")
+    assert config.models is not None
+
+# Bad: Testing multiple things
+def test_everything():
+    config = load_config("config.yaml")
+    assert config.models is not None
+    assert config.tools is not None
+    assert config.sandbox is not None
+    # ... many more assertions
+```
+
+#### 2. Use Descriptive Test Names
+
+```python
+# Good: Describes behavior and expected outcome
+def test_wait_for_kubeconfig_rejects_directory():
+    pass
+
+def test_detect_mode_defaults_to_local_when_config_missing():
+    pass
+
+# Bad: Vague or abbreviated names
+def test_kubeconfig():
+    pass
+
+def test_detect():
+    pass
+```
+
+#### 3. Use Fixtures for Shared Setup
+
+```python
+@pytest.fixture
+def temp_config_file(tmp_path):
+    """Create a temporary config file for testing."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("""
+    models:
+      - name: test-model
+        use: langchain_openai:ChatOpenAI
+    """)
+    return config_file
+
+def test_load_config(temp_config_file):
+    config = load_config(temp_config_file)
+    assert config.models[0].name == "test-model"
+```
+
+#### 4. Mock External Dependencies
+
+```python
+def test_api_call_handles_network_error():
+    with patch("httpx.get") as mock_get:
+        mock_get.side_effect = httpx.NetworkError("Connection failed")
+        
+        result = fetch_data("http://example.com")
+        
+        assert result is None
+        assert mock_get.called
+```
+
+#### 5. Test Edge Cases and Error Conditions
+
+```python
+class TestInputValidation:
+    def test_empty_input_raises_error(self):
+        with pytest.raises(ValueError, match="cannot be empty"):
+            process_input("")
+    
+    def test_none_input_raises_error(self):
+        with pytest.raises(ValueError, match="cannot be None"):
+            process_input(None)
+    
+    def test_invalid_type_raises_error(self):
+        with pytest.raises(TypeError):
+            process_input(123)  # expects string
+```
+
+#### 6. Test Happy Path and Failure Cases
+
+```python
+class TestFileOperations:
+    def test_read_file_success(self, tmp_path):
+        file_path = tmp_path / "test.txt"
+        file_path.write_text("content")
+        
+        result = read_file(file_path)
+        assert result == "content"
+    
+    def test_read_file_not_found(self):
+        with pytest.raises(FileNotFoundError):
+            read_file("/nonexistent/file.txt")
+    
+    def test_read_file_permission_error(self, tmp_path):
+        # Test permission denied scenarios
+        pass
+```
+
+### Integration Test Guidelines
+
+#### Live Tests
+
+Live tests (like `test_client_live.py`) require actual configuration:
+
+```python
+import pytest
+from pathlib import Path
+
+# Skip if config.yaml not present
+CONFIG_PATH = Path("../config.yaml")
+if not CONFIG_PATH.exists():
+    pytest.skip("config.yaml required for live tests", allow_module_level=True)
+
+def test_live_chat():
+    """Test actual agent conversation."""
+    client = DeerFlowClient()
+    response = client.chat("Hello", thread_id="test-thread")
+    assert isinstance(response, str)
+    assert len(response) > 0
+```
+
+Run live tests separately:
+```bash
+PYTHONPATH=. uv run pytest tests/test_client_live.py -v
+```
+
+#### Gateway Conformance Tests
+
+Ensure client responses match Gateway API schemas:
+
+```python
+from src.gateway.routers.models import ModelsListResponse, ModelResponse
+
+class TestGatewayConformance:
+    def test_list_models_response_format(self, client):
+        """Verify list_models() matches Gateway schema."""
+        result = client.list_models()
+        
+        # Should parse without error
+        response = ModelsListResponse(**result)
+        
+        assert len(response.models) > 0
+        assert all(isinstance(m, ModelResponse) for m in response.models)
+```
+
+This catches schema drift between client and Gateway API.
+
+### Testing Patterns
+
+#### Pattern 1: Configuration Testing
+
+```python
+def test_config_with_environment_variables(monkeypatch):
+    """Test config resolution from environment."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    
+    config = load_config("config.yaml")
+    model = config.models[0]
+    
+    # Config values starting with $ are resolved from env
+    assert model.api_key == "test-key"
+```
+
+#### Pattern 2: Subprocess Testing
+
+```python
+import subprocess
+
+def test_script_execution():
+    """Test shell script behavior."""
+    result = subprocess.run(
+        ["bash", "-c", "source script.sh && my_function"],
+        capture_output=True,
+        text=True,
+    )
+    
+    assert result.returncode == 0
+    assert "expected output" in result.stdout
+```
+
+#### Pattern 3: File System Testing
+
+```python
+def test_file_creation(tmp_path):
+    """Test file operations with temporary directory."""
+    output_dir = tmp_path / "output"
+    
+    create_files(output_dir)
+    
+    assert output_dir.exists()
+    assert (output_dir / "file.txt").exists()
+    assert (output_dir / "file.txt").read_text() == "expected content"
+```
+
+#### Pattern 4: Mocking Module Imports
+
+For circular import issues, use `conftest.py`:
+
+```python
+# In conftest.py
+import sys
+from unittest.mock import MagicMock
+
+# Mock problematic module before any imports
+_executor_mock = MagicMock()
+_executor_mock.SubagentExecutor = MagicMock
+_executor_mock.MAX_CONCURRENT_SUBAGENTS = 3
+
+sys.modules["src.subagents.executor"] = _executor_mock
+```
+
+## Test Coverage
+
+### Measuring Coverage
+
+```bash
+# Generate HTML coverage report
+PYTHONPATH=. uv run pytest tests/ --cov=src --cov-report=html
+
+# View report
+open htmlcov/index.html
+```
+
+### Coverage Goals
+
+- **Critical paths**: 100% coverage (auth, data integrity)
+- **Core functionality**: 80%+ coverage
+- **Utility functions**: 70%+ coverage
+- **UI components**: 60%+ coverage
+
+### Coverage Best Practices
+
+- Focus on code paths, not just line coverage
+- Test error handling paths
+- Test boundary conditions
+- Don't chase 100% for trivial code
+- Use coverage to find gaps, not as only metric
+
+## Continuous Integration
+
+### GitHub Actions Workflow
+
+The CI workflow runs on every pull request:
+
+```yaml
+# .github/workflows/backend-unit-tests.yml
+name: Backend Unit Tests
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-unit-tests.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install uv
+          uv sync
+      - name: Run tests
+        run: |
+          cd backend
+          make test
+```
+
+### Pre-commit Hooks
+
+Set up pre-commit hooks to run tests locally:
+
+```bash
+# Install pre-commit
+pip install pre-commit
+
+# Install hooks
+pre-commit install
+
+# Run manually
+pre-commit run --all-files
+```
+
+## Debugging Failed Tests
+
+### Verbose Output
+
+```bash
+# Show print statements and full error traces
+PYTHONPATH=. uv run pytest tests/ -v -s
+```
+
+### Run Specific Tests
+
+```bash
+# Run only failing test
+PYTHONPATH=. uv run pytest tests/test_file.py::test_function -v
+```
+
+### Use pytest Debugger
+
+```bash
+# Drop into debugger on failure
+PYTHONPATH=. uv run pytest tests/ --pdb
+
+# Drop into debugger on first failure
+PYTHONPATH=. uv run pytest tests/ -x --pdb
+```
+
+### Add Debug Output
+
+```python
+def test_something():
+    result = function_under_test()
+    
+    # Add debug output
+    print(f"Result: {result}")
+    print(f"Type: {type(result)}")
+    
+    assert result == "expected"
+```
+
+## Test Maintenance
+
+### Keep Tests Fast
+
+- Mock expensive operations (network, disk)
+- Use in-memory databases for data tests
+- Avoid sleep() calls when possible
+- Run slow tests separately with markers
+
+### Keep Tests Independent
+
+- Each test should run in isolation
+- Don't rely on test execution order
+- Clean up resources in fixtures
+- Use `tmp_path` for file operations
+
+### Update Tests with Code Changes
+
+- Modify tests when refactoring code
+- Add tests for new features
+- Remove tests for deleted features
+- Keep test documentation current
+
+## Resources
+
+- [pytest Documentation](https://docs.pytest.org/)
+- [Python Testing Best Practices](https://docs.python-guide.org/writing/tests/)
+- [Test-Driven Development](https://en.wikipedia.org/wiki/Test-driven_development)
+- [Backend Tests Directory](/workspace/source/backend/tests/)

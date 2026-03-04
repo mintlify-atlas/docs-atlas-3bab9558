@@ -1,0 +1,561 @@
+---
+title: Sandbox Errors
+description: Solutions for Docker containers, path mapping, and sandbox execution issues
+---
+
+## Docker Container Issues
+
+<Accordion title="Container runtime not detected or Docker not available">
+  **Problem**: `Docker not available` or `Container runtime not detected` errors.
+
+  **Solution**:
+
+  DeerFlow supports multiple container runtimes:
+  - **macOS**: Automatically prefers Apple Container if available, falls back to Docker
+  - **Other platforms**: Uses Docker
+
+  1. **Verify Docker is running**:
+     ```bash
+     docker ps
+     # Should list containers (empty list is OK)
+     ```
+
+  2. **On macOS with Apple Container**:
+     ```bash
+     # Check if Apple Container is installed
+     container --version
+
+     # Start Apple Container service
+     container system start
+
+     # If not installed, download from:
+     # https://github.com/apple/container/releases
+     ```
+
+  3. **Force Docker runtime (if Apple Container has issues)**:
+     ```bash
+     # Temporarily rename container command to force Docker fallback
+     sudo mv /opt/homebrew/bin/container /opt/homebrew/bin/container.bak
+     
+     # Restart DeerFlow
+     make stop && make dev
+     
+     # Restore when ready
+     sudo mv /opt/homebrew/bin/container.bak /opt/homebrew/bin/container
+     ```
+
+  4. **Check Docker Desktop is running**:
+     - macOS/Windows: Launch Docker Desktop app
+     - Linux: `sudo systemctl start docker`
+</Accordion>
+
+<Accordion title="Sandbox image pull failing or timing out">
+  **Problem**: `Failed to pull image` or long wait times when first using sandbox.
+
+  **Solution**:
+
+  The sandbox image is large (~500MB+) and pulled on first use.
+
+  1. **Pre-pull the image (recommended)**:
+     ```bash
+     # From project root
+     make setup-sandbox
+     ```
+
+  2. **Manual pull with progress**:
+     ```bash
+     # For Docker
+     docker pull enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+
+     # For Apple Container (macOS)
+     container pull enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+     ```
+
+  3. **Use alternative registry (if blocked)**:
+     ```yaml
+     # In config.yaml
+     sandbox:
+       use: src.community.aio_sandbox:AioSandboxProvider
+       image: docker.io/your-registry/all-in-one-sandbox:latest
+     ```
+
+  4. **Verify image exists after pull**:
+     ```bash
+     # Docker
+     docker images | grep all-in-one-sandbox
+
+     # Apple Container
+     container images
+     ```
+
+  5. **Check disk space**:
+     ```bash
+     df -h
+     # Need at least 2GB free for image + containers
+     ```
+</Accordion>
+
+<Accordion title="Container fails to start or exits immediately">
+  **Problem**: Sandbox container starts but exits with error, or never becomes ready.
+
+  **Solution**:
+
+  1. **Check container logs**:
+     ```bash
+     # List containers (including stopped)
+     docker ps -a | grep deer-flow-sandbox
+
+     # View logs for specific container
+     docker logs <container-id>
+
+     # For Apple Container
+     container list
+     container logs <container-id>
+     ```
+
+  2. **Verify port availability**:
+     ```bash
+     # Check if port 8080 (or configured port) is available
+     lsof -i :8080
+     
+     # If in use, either:
+     # a) Kill the process using it
+     kill -9 <PID>
+     
+     # b) Change sandbox port in config.yaml
+     # sandbox:
+     #   port: 8090  # Use different port
+     ```
+
+  3. **Check container resource limits**:
+     ```bash
+     # Verify Docker has enough resources
+     docker info | grep -i memory
+     docker info | grep -i cpu
+
+     # Increase in Docker Desktop:
+     # Settings → Resources → Increase Memory to 4GB+
+     ```
+
+  4. **Test container manually**:
+     ```bash
+     # Try running container directly
+     docker run --rm -p 8080:8080 \
+       enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+
+     # Should see sandbox startup logs
+     # If fails, check error message
+     ```
+
+  5. **Verify image architecture matches system**:
+     ```bash
+     # Check your system architecture
+     uname -m
+     # arm64 (Apple Silicon) or x86_64 (Intel)
+
+     # Verify image supports your architecture
+     docker inspect enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest \
+       | grep -i architecture
+     ```
+</Accordion>
+
+<Accordion title="Multiple sandbox containers running or orphaned containers">
+  **Problem**: Many sandbox containers accumulate over time, consuming resources.
+
+  **Solution**:
+
+  1. **Clean up DeerFlow sandbox containers**:
+     ```bash
+     # From project root
+     make stop
+     # This automatically cleans up sandbox containers
+     ```
+
+  2. **Manual cleanup script**:
+     ```bash
+     # Clean all DeerFlow sandbox containers
+     ./scripts/cleanup-containers.sh deer-flow-sandbox
+     ```
+
+  3. **Remove all stopped containers**:
+     ```bash
+     # Docker
+     docker container prune -f
+
+     # Apple Container
+     container prune
+     ```
+
+  4. **Force remove specific container**:
+     ```bash
+     # Docker
+     docker rm -f <container-id>
+
+     # Apple Container
+     container rm -f <container-id>
+     ```
+
+  5. **Verify cleanup**:
+     ```bash
+     # Should show no DeerFlow containers
+     docker ps -a | grep deer-flow-sandbox
+     ```
+
+  6. **Configure auto-removal (already default)**:
+     ```yaml
+     # In config.yaml - already set by default
+     sandbox:
+       use: src.community.aio_sandbox:AioSandboxProvider
+       # Containers automatically removed on stop due to --rm flag
+     ```
+</Accordion>
+
+## Path Mapping Problems
+
+<Accordion title="File not found in sandbox despite existing on host">
+  **Problem**: Agent reports `File not found` but file exists on host machine.
+
+  **Solution**:
+
+  DeerFlow uses virtual path mapping between host and sandbox:
+
+  **Path Translation**:
+  - Agent sees: `/mnt/user-data/workspace/file.txt`
+  - Host location: `backend/.deer-flow/threads/{thread_id}/user-data/workspace/file.txt`
+  - Agent sees: `/mnt/skills/public/research/SKILL.md`
+  - Host location: `skills/public/research/SKILL.md`
+
+  1. **Verify file exists on host**:
+     ```bash
+     # From project root
+     ls -la backend/.deer-flow/threads/<thread-id>/user-data/workspace/
+     ```
+
+  2. **Check path mapping in config**:
+     ```yaml
+     # In config.yaml
+     skills:
+       path: ../skills  # Host path (relative to backend/)
+       container_path: /mnt/skills  # Sandbox path
+     ```
+
+  3. **Verify Docker mounts (if using Docker sandbox)**:
+     ```bash
+     # Inspect running sandbox container
+     docker inspect <container-id> | grep -A 10 Mounts
+
+     # Should show mounts like:
+     # /path/to/backend/.deer-flow/threads/xxx → /mnt/user-data
+     # /path/to/skills → /mnt/skills
+     ```
+
+  4. **Test file access from within container**:
+     ```bash
+     # Execute command inside running sandbox
+     docker exec <container-id> ls -la /mnt/user-data/workspace/
+
+     # For Apple Container
+     container exec <container-id> ls -la /mnt/user-data/workspace/
+     ```
+
+  5. **Common path mistakes**:
+     - ❌ Wrong: `read_file("/home/user/file.txt")` (not mounted)
+     - ✅ Correct: `read_file("/mnt/user-data/workspace/file.txt")`
+     - ❌ Wrong: Relative paths like `./file.txt` (ambiguous)
+     - ✅ Correct: Absolute paths starting with `/mnt/`
+</Accordion>
+
+<Accordion title="Skills not found or not loading in sandbox">
+  **Problem**: Agent reports skills unavailable or cannot access skill files.
+
+  **Solution**:
+
+  1. **Verify skills directory exists**:
+     ```bash
+     # From project root
+     ls -la skills/public/
+     ls -la skills/custom/
+
+     # Should contain skill directories with SKILL.md files
+     ```
+
+  2. **Check skills configuration**:
+     ```yaml
+     # In config.yaml
+     skills:
+       path: ../skills  # Must exist relative to backend/
+       container_path: /mnt/skills
+     ```
+
+  3. **Verify skills are enabled**:
+     ```json
+     // In extensions_config.json
+     {
+       "skills": {
+         "research": {"enabled": true},
+         "report-generation": {"enabled": true}
+       }
+     }
+     ```
+
+  4. **Check skill file format**:
+     ```bash
+     # Each skill needs SKILL.md with frontmatter
+     cat skills/public/research/SKILL.md
+
+     # Should start with:
+     # ---
+     # name: research
+     # description: ...
+     # ---
+     ```
+
+  5. **Verify mount in container**:
+     ```bash
+     # Check if skills are accessible in sandbox
+     docker exec <container-id> ls -la /mnt/skills/public/
+
+     # Should list skill directories
+     ```
+
+  6. **Restart to reload skills**:
+     ```bash
+     make stop
+     make dev
+     ```
+</Accordion>
+
+<Accordion title="Permission denied errors in sandbox">
+  **Problem**: `Permission denied` when accessing files or executing commands in sandbox.
+
+  **Solution**:
+
+  1. **Check host file permissions**:
+     ```bash
+     # Files should be readable by your user
+     ls -la backend/.deer-flow/threads/
+     ls -la skills/
+
+     # Fix permissions if needed
+     chmod -R u+rw backend/.deer-flow/
+     chmod -R u+r skills/
+     ```
+
+  2. **For Docker on Linux - user ID mapping**:
+     ```bash
+     # Check your user ID
+     id -u
+     # Should match container user (usually 1000)
+
+     # If different, fix ownership:
+     sudo chown -R $USER:$USER backend/.deer-flow/
+     sudo chown -R $USER:$USER skills/
+     ```
+
+  3. **SELinux issues (Linux)**:
+     ```bash
+     # If using SELinux, add :z flag to mounts
+     # Edit docker-compose or mount configuration
+     # volumes:
+     #   - ./skills:/mnt/skills:z
+     ```
+
+  4. **Read-only mount issues**:
+     ```bash
+     # Verify mounts are not read-only (except skills)
+     docker inspect <container-id> | grep -i readonly
+
+     # Skills should be read-only: true
+     # user-data should be read-only: false
+     ```
+
+  5. **Windows path permissions**:
+     - Ensure Docker Desktop has access to drive
+     - Settings → Resources → File Sharing → Add drive
+</Accordion>
+
+## Kubernetes/Provisioner Issues
+
+<Accordion title="Provisioner cannot connect to Kubernetes API">
+  **Problem**: `Connection refused` to K8s API when using provisioner mode.
+
+  **Solution**:
+
+  1. **Check Kubernetes cluster is running**:
+     ```bash
+     kubectl cluster-info
+     # Should show cluster endpoint
+
+     kubectl get nodes
+     # Should list at least one node
+     ```
+
+  2. **Enable Kubernetes in Docker Desktop**:
+     - Open Docker Desktop → Settings
+     - Navigate to Kubernetes tab
+     - Check "Enable Kubernetes"
+     - Click "Apply & Restart"
+     - Wait for Kubernetes to start (may take 2-5 minutes)
+
+  3. **Check API server address in kubeconfig**:
+     ```bash
+     kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}'
+     # If shows localhost or 127.0.0.1, provisioner can't reach it
+     ```
+
+  4. **Override API server for provisioner**:
+     ```yaml
+     # In docker-compose-dev.yaml or docker/docker-compose-dev.yaml
+     provisioner:
+       environment:
+         - K8S_API_SERVER=https://host.docker.internal:6443
+         # Replace 6443 with your API server port
+     ```
+
+  5. **Verify kubeconfig mount**:
+     ```bash
+     # Check provisioner can access kubeconfig
+     docker exec deer-flow-provisioner ls -la /root/.kube/config
+
+     # Should be a file, not a directory
+     # -rw-r--r-- 1 root root ... config
+     ```
+
+  6. **Test connection from provisioner**:
+     ```bash
+     docker exec deer-flow-provisioner kubectl get nodes
+     # Should list nodes if connection works
+     ```
+</Accordion>
+
+<Accordion title="Sandbox Pods stuck in Pending or ContainerCreating">
+  **Problem**: Kubernetes Pods for sandboxes never become Ready.
+
+  **Solution**:
+
+  1. **Check Pod status and events**:
+     ```bash
+     kubectl get pods -n deer-flow
+     kubectl describe pod <sandbox-pod-name> -n deer-flow
+     # Look at Events section for errors
+     ```
+
+  2. **Common causes**:
+
+     **Image pull issues**:
+     ```bash
+     # Pre-pull image on Kubernetes node
+     docker pull enterprise-public-cn-beijing.cr.volces.com/vefaas-public/all-in-one-sandbox:latest
+     ```
+
+     **Resource constraints**:
+     ```bash
+     # Check node resources
+     kubectl describe node
+     # Look for CPU/Memory pressure
+
+     # Reduce resource requests if needed (in provisioner config)
+     ```
+
+     **Volume mount issues**:
+     ```bash
+     # Verify host paths exist
+     ls -la $SKILLS_HOST_PATH
+     ls -la $THREADS_HOST_PATH
+
+     # Paths must be absolute, not relative
+     ```
+
+  3. **Check provisioner logs**:
+     ```bash
+     docker logs deer-flow-provisioner
+     # Look for Pod creation errors
+     ```
+
+  4. **Verify namespace exists**:
+     ```bash
+     kubectl get namespace deer-flow
+     # Should show Active
+
+     # Create if missing:
+     kubectl create namespace deer-flow
+     ```
+
+  5. **Test Pod creation manually**:
+     ```bash
+     # Create test Pod to verify K8s setup
+     kubectl run test-pod -n deer-flow --image=nginx --restart=Never
+     kubectl get pod test-pod -n deer-flow
+     # Should become Running
+
+     # Clean up
+     kubectl delete pod test-pod -n deer-flow
+     ```
+</Accordion>
+
+<Accordion title="Cannot access sandbox URL from backend containers">
+  **Problem**: Backend can't reach sandbox via NodePort URL.
+
+  **Solution**:
+
+  1. **Verify Service was created**:
+     ```bash
+     kubectl get svc -n deer-flow
+     # Should show Service with NodePort type
+
+     kubectl describe svc <sandbox-service-name> -n deer-flow
+     # Note the NodePort value (e.g., 32123)
+     ```
+
+  2. **Test from host machine first**:
+     ```bash
+     # Get NodePort from Service
+     NODE_PORT=$(kubectl get svc -n deer-flow -l sandbox-id=<sandbox-id> \
+       -o jsonpath='{.items[0].spec.ports[0].nodePort}')
+
+     # Test from host
+     curl http://localhost:$NODE_PORT/v1/sandbox
+     # Should return sandbox info
+     ```
+
+  3. **Test from backend container**:
+     ```bash
+     # If host test works but container test fails:
+     docker exec deer-flow-gateway curl http://host.docker.internal:$NODE_PORT/v1/sandbox
+     ```
+
+  4. **Check extra_hosts in docker-compose (Linux)**:
+     ```yaml
+     # In docker-compose-dev.yaml
+     services:
+       gateway:
+         extra_hosts:
+           - "host.docker.internal:host-gateway"
+       langgraph:
+         extra_hosts:
+           - "host.docker.internal:host-gateway"
+     ```
+
+  5. **Verify NODE_HOST configuration**:
+     ```bash
+     # Check provisioner config
+     docker exec deer-flow-provisioner env | grep NODE_HOST
+     # Should show: NODE_HOST=host.docker.internal
+     ```
+
+  6. **Check Pod network is reachable**:
+     ```bash
+     # Get Pod IP
+     kubectl get pod -n deer-flow -o wide
+
+     # Try direct Pod IP (may not work if network not bridged)
+     curl http://<pod-ip>:8080/v1/sandbox
+     ```
+</Accordion>
+
+## Next Steps
+
+- [Model Configuration](/troubleshooting/model-configuration) - Fix LLM provider issues
+- [Performance Tuning](/troubleshooting/performance) - Optimize sandbox performance
+- [Configuration Guide](/configuration/config-yaml) - Complete sandbox configuration
+- [Provisioner Setup](/deployment/kubernetes) - Detailed Kubernetes setup guide
