@@ -1,0 +1,179 @@
+{
+  "projectType": "framework",
+  "projectName": "DeerFlow",
+  "projectDescription": "An open-source SuperAgent harness with sandboxes, memory, tools, skills, and sub-agents for complex multi-step AI tasks",
+  "theme": "aspen",
+  "primaryColor": "#996f4b",
+  "lightColor": "#5f4936",
+  "darkColor": "#b6a18e",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/agent-system",
+              "concepts/sandbox",
+              "concepts/skills",
+              "concepts/sub-agents",
+              "concepts/memory",
+              "concepts/tools"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/overview",
+              "configuration/models",
+              "configuration/sandbox-modes",
+              "configuration/skills-and-mcp",
+              "configuration/memory",
+              "configuration/environment-variables"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/installation",
+              "guides/docker-setup",
+              "guides/local-development",
+              "guides/creating-skills",
+              "guides/custom-tools",
+              "guides/mcp-servers",
+              "guides/file-uploads",
+              "guides/plan-mode"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/docker",
+              "deployment/kubernetes",
+              "deployment/production"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Python Client",
+            "pages": [
+              "api/python-client/overview",
+              "api/python-client/chat",
+              "api/python-client/streaming",
+              "api/python-client/configuration"
+            ]
+          },
+          {
+            "group": "Gateway API",
+            "pages": [
+              "api/gateway/overview",
+              "api/gateway/models",
+              "api/gateway/skills",
+              "api/gateway/mcp",
+              "api/gateway/memory",
+              "api/gateway/uploads",
+              "api/gateway/artifacts"
+            ]
+          },
+          {
+            "group": "LangGraph API",
+            "pages": [
+              "api/langgraph/overview",
+              "api/langgraph/threads",
+              "api/langgraph/streaming"
+            ]
+          },
+          {
+            "group": "Agent Tools",
+            "pages": [
+              "api/tools/built-in",
+              "api/tools/sandbox",
+              "api/tools/sub-agents",
+              "api/tools/community"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Advanced",
+        "groups": [
+          {
+            "group": "Architecture",
+            "pages": [
+              "advanced/middleware-chain",
+              "advanced/thread-state",
+              "advanced/context-engineering",
+              "advanced/model-factory",
+              "advanced/reflection-system"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "advanced/contributing",
+              "advanced/testing",
+              "advanced/code-style",
+              "advanced/debugging"
+            ]
+          },
+          {
+            "group": "Troubleshooting",
+            "pages": [
+              "troubleshooting/common-issues",
+              "troubleshooting/sandbox-errors",
+              "troubleshooting/model-configuration",
+              "troubleshooting/performance"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "LangGraph-based agent orchestration with sub-agent delegation",
+    "Isolated sandbox execution environment with Docker/Kubernetes support",
+    "Extensible skills system with progressive loading",
+    "Long-term memory with fact extraction and context management",
+    "MCP server integration with OAuth support",
+    "Multi-model support with vision and reasoning capabilities",
+    "Middleware chain for context engineering and summarization",
+    "Embedded Python client and REST API",
+    "Thread-isolated filesystem with automatic file conversion",
+    "Real-time streaming with SSE protocol"
+  ],
+  "publicApiSurface": [
+    "DeerFlowClient - Embedded Python client for in-process agent access",
+    "DeerFlowClient.chat() - Synchronous chat interface",
+    "DeerFlowClient.stream() - Streaming chat with SSE protocol",
+    "DeerFlowClient.list_models() - List available LLM models",
+    "DeerFlowClient.list_skills() - List available skills",
+    "DeerFlowClient.update_skill() - Enable/disable skills",
+    "DeerFlowClient.upload_files() - Upload files to thread",
+    "DeerFlowClient.get_memory() - Access long-term memory",
+    "Gateway API: /api/models - Model management endpoints",
+    "Gateway API: /api/skills - Skills management endpoints",
+    "Gateway API: /api/mcp - MCP server configuration",
+    "Gateway API: /api/memory - Memory management",
+    "Gateway API: /api/threads/{id}/uploads - File upload endpoints",
+    "Gateway API: /api/threads/{id}/artifacts - Artifact serving",
+    "LangGraph API: /api/langgraph/threads - Thread management",
+    "LangGraph API: /api/langgraph/runs - Agent runs and streaming",
+    "Sandbox Tools: bash, ls, read_file, write_file, str_replace",
+    "Built-in Tools: present_files, ask_clarification, view_image",
+    "Sub-agent Tool: task() - Delegate to sub-agents",
+    "Community Tools: tavily_search, web_fetch, firecrawl, image_search"
+  ]
+}
