@@ -94,6 +94,7 @@
             "pages": [
               "api/gateway/overview",
               "api/gateway/models",
+              "api/gateway/agents",
               "api/gateway/skills",
               "api/gateway/mcp",
               "api/gateway/memory",

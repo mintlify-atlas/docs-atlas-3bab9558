@@ -28,6 +28,7 @@ http://localhost:8001/api/memory
 The Gateway API is built with FastAPI and provides:
 
 - **Models Management**: Query available AI models and their capabilities
+- **Custom Agents**: Create and manage specialized agents with SOUL.md profiles
 - **Skills Management**: List, enable/disable, and install custom skills
 - **MCP Configuration**: Manage Model Context Protocol server configurations
 - **Memory Management**: Access and reload global memory data
@@ -127,6 +128,9 @@ Response:
   <Card title="Models API" icon="brain" href="/api/gateway/models">
     Query available AI models
   </Card>
+  <Card title="Custom Agents API" icon="user-robot" href="/api/gateway/agents">
+    Create specialized agents
+  </Card>
   <Card title="Skills API" icon="puzzle-piece" href="/api/gateway/skills">
     Manage skills and extensions
   </Card>
@@ -135,5 +139,8 @@ Response:
   </Card>
   <Card title="Memory API" icon="database" href="/api/gateway/memory">
     Access global memory
+  </Card>
+  <Card title="Uploads API" icon="upload" href="/api/gateway/uploads">
+    Manage file uploads
   </Card>
 </CardGroup>

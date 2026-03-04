@@ -1,0 +1,514 @@
+---
+title: Custom Agents API
+description: Create and manage custom agents with SOUL.md profiles
+---
+
+The Custom Agents API allows you to create specialized agents with custom personalities, behaviors, and configurations.
+
+## Overview
+
+Custom agents extend DeerFlow with:
+- **SOUL.md**: Agent personality and behavioral guardrails
+- **Model override**: Use specific LLM for this agent
+- **Tool groups**: Restrict available tools
+- **USER.md**: Global user profile injected into all custom agents
+
+**Base URL**: `http://localhost:8001/api`
+
+## List Custom Agents
+
+Get all custom agents available in the agents directory.
+
+```http
+GET /agents
+```
+
+### Response
+
+<ResponseField name="agents" type="array">
+  Array of agent objects
+  
+  <Expandable title="Agent object">
+    <ResponseField name="name" type="string">
+      Agent identifier (hyphen-case)
+    </ResponseField>
+    
+    <ResponseField name="description" type="string">
+      Agent description
+    </ResponseField>
+    
+    <ResponseField name="model" type="string">
+      Optional model override
+    </ResponseField>
+    
+    <ResponseField name="tool_groups" type="array">
+      Optional tool group whitelist
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example
+
+```bash
+curl http://localhost:8001/api/agents
+```
+
+```json Response
+{
+  "agents": [
+    {
+      "name": "code-reviewer",
+      "description": "Expert code reviewer with focus on best practices",
+      "model": "gpt-4",
+      "tool_groups": ["sandbox"]
+    },
+    {
+      "name": "researcher",
+      "description": "Research specialist with web access",
+      "model": null,
+      "tool_groups": ["sandbox", "research"]
+    }
+  ]
+}
+```
+
+## Check Agent Name
+
+Validate an agent name and check availability.
+
+```http
+GET /agents/check?name={name}
+```
+
+### Parameters
+
+<ParamField query="name" type="string" required>
+  Agent name to check (must match `^[A-Za-z0-9-]+$`)
+</ParamField>
+
+### Response
+
+<ResponseField name="available" type="boolean">
+  Whether the name is available (case-insensitive)
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Normalized name (lowercase)
+</ResponseField>
+
+### Example
+
+```bash
+curl "http://localhost:8001/api/agents/check?name=Code-Reviewer"
+```
+
+```json Response
+{
+  "available": false,
+  "name": "code-reviewer"
+}
+```
+
+## Get Custom Agent
+
+Retrieve details and SOUL.md content for a specific agent.
+
+```http
+GET /agents/{name}
+```
+
+### Parameters
+
+<ParamField path="name" type="string" required>
+  Agent name
+</ParamField>
+
+### Response
+
+<ResponseField name="name" type="string">
+  Agent identifier
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Agent description
+</ResponseField>
+
+<ResponseField name="model" type="string">
+  Optional model override
+</ResponseField>
+
+<ResponseField name="tool_groups" type="array">
+  Optional tool group whitelist
+</ResponseField>
+
+<ResponseField name="soul" type="string">
+  SOUL.md content (included in GET only)
+</ResponseField>
+
+### Example
+
+```bash
+curl http://localhost:8001/api/agents/code-reviewer
+```
+
+```json Response
+{
+  "name": "code-reviewer",
+  "description": "Expert code reviewer",
+  "model": "gpt-4",
+  "tool_groups": ["sandbox"],
+  "soul": "# Code Reviewer\\n\\nYou are an expert code reviewer...\\n"
+}
+```
+
+## Create Custom Agent
+
+Create a new custom agent with config and SOUL.md.
+
+```http
+POST /agents
+```
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Agent name (must match `^[A-Za-z0-9-]+$`, stored as lowercase)
+</ParamField>
+
+<ParamField body="description" type="string" default="">
+  Agent description
+</ParamField>
+
+<ParamField body="model" type="string">
+  Optional model override (e.g., "gpt-4", "claude-3-opus")
+</ParamField>
+
+<ParamField body="tool_groups" type="array">
+  Optional tool group whitelist (e.g., ["sandbox", "research"])
+</ParamField>
+
+<ParamField body="soul" type="string" default="">
+  SOUL.md content - agent personality and behavioral guardrails
+</ParamField>
+
+### Response
+
+Returns the created agent object with all fields including SOUL.md content.
+
+### Example
+
+```bash
+curl -X POST http://localhost:8001/api/agents \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "name": "data-scientist",
+    "description": "Expert in data analysis and visualization",
+    "model": "gpt-4",
+    "tool_groups": ["sandbox", "research"],
+    "soul": "# Data Scientist\\n\\nYou are an expert data scientist...\\n"
+  }'
+```
+
+```json Response
+{
+  "name": "data-scientist",
+  "description": "Expert in data analysis and visualization",
+  "model": "gpt-4",
+  "tool_groups": ["sandbox", "research"],
+  "soul": "# Data Scientist\\n\\nYou are an expert data scientist...\\n"
+}
+```
+
+<Warning>
+  Agent names are case-insensitive and normalized to lowercase for storage.
+</Warning>
+
+## Update Custom Agent
+
+Update an existing agent's config and/or SOUL.md.
+
+```http
+PUT /agents/{name}
+```
+
+### Parameters
+
+<ParamField path="name" type="string" required>
+  Agent name
+</ParamField>
+
+### Request Body
+
+All fields are optional. Only provided fields will be updated.
+
+<ParamField body="description" type="string">
+  Updated description
+</ParamField>
+
+<ParamField body="model" type="string">
+  Updated model override
+</ParamField>
+
+<ParamField body="tool_groups" type="array">
+  Updated tool group whitelist
+</ParamField>
+
+<ParamField body="soul" type="string">
+  Updated SOUL.md content
+</ParamField>
+
+### Response
+
+Returns the updated agent object with all fields.
+
+### Example
+
+```bash
+curl -X PUT http://localhost:8001/api/agents/data-scientist \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "description": "Senior data scientist with ML expertise",
+    "soul": "# Data Scientist\\n\\nYou are a senior data scientist...\\n"
+  }'
+```
+
+## Delete Custom Agent
+
+Delete a custom agent and all its files.
+
+```http
+DELETE /agents/{name}
+```
+
+### Parameters
+
+<ParamField path="name" type="string" required>
+  Agent name
+</ParamField>
+
+### Response
+
+Returns `204 No Content` on success.
+
+### Example
+
+```bash
+curl -X DELETE http://localhost:8001/api/agents/data-scientist
+```
+
+<Warning>
+  This permanently deletes the agent directory including config.yaml, SOUL.md, and any agent-specific memory.
+</Warning>
+
+## Get User Profile
+
+Read the global USER.md file injected into all custom agents.
+
+```http
+GET /user-profile
+```
+
+### Response
+
+<ResponseField name="content" type="string">
+  USER.md content, or `null` if not yet created
+</ResponseField>
+
+### Example
+
+```bash
+curl http://localhost:8001/api/user-profile
+```
+
+```json Response
+{
+  "content": "# About Me\\n\\nI'm a software engineer...\\n"
+}
+```
+
+## Update User Profile
+
+Write the global USER.md file that describes you to all agents.
+
+```http
+PUT /user-profile
+```
+
+### Request Body
+
+<ParamField body="content" type="string" default="">
+  USER.md content - your background, preferences, and context
+</ParamField>
+
+### Response
+
+<ResponseField name="content" type="string">
+  The saved content
+</ResponseField>
+
+### Example
+
+```bash
+curl -X PUT http://localhost:8001/api/user-profile \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "content": "# About Me\\n\\nI am a senior software engineer at TechCorp, specializing in distributed systems and microservices architecture. I prefer Python and Go for backend development.\\n\\n## Preferences\\n\\n- Code style: Follow PEP 8 for Python\\n- Testing: Strong believer in TDD\\n- Documentation: Prefer inline comments over external docs\\n"
+  }'
+```
+
+## SOUL.md Format
+
+SOUL.md defines your custom agent's personality and behavior:
+
+```markdown
+# Agent Name
+
+Brief description of the agent's role and expertise.
+
+## Personality
+
+- Tone: Professional, concise, technical
+- Style: Direct answers with code examples
+- Focus: Best practices and maintainability
+
+## Behavioral Guardrails
+
+- Always provide type hints in Python code
+- Prefer explicit over implicit
+- Test-driven development approach
+- Security-first mindset
+
+## Expertise Areas
+
+- Python backend development
+- Distributed systems
+- Database optimization
+- API design
+
+## Communication Style
+
+When reviewing code:
+1. Start with positive observations
+2. Identify critical issues first
+3. Suggest improvements with examples
+4. Explain the reasoning behind recommendations
+
+## Tools Preference
+
+Prefer using these tools in this order:
+1. read_file - Understand context first
+2. bash - Run tests and checks
+3. write_file - Apply fixes
+4. present_files - Show results
+```
+
+## Agent Directory Structure
+
+Custom agents are stored in:
+
+```
+backend/.deer-flow/agents/
+├── code-reviewer/
+│   ├── config.yaml      # Agent configuration
+│   └── SOUL.md          # Agent personality
+└── data-scientist/
+    ├── config.yaml
+    └── SOUL.md
+```
+
+**config.yaml**:
+```yaml
+name: code-reviewer
+description: Expert code reviewer with focus on best practices
+model: gpt-4
+tool_groups:
+  - sandbox
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Write clear SOUL.md">
+    Define personality, behavioral guardrails, and communication style explicitly.
+    
+    ```markdown
+    # Code Reviewer
+    
+    You are an expert code reviewer focusing on:
+    - Security vulnerabilities
+    - Performance optimization
+    - Code maintainability
+    - Best practices
+    
+    Always explain WHY a change is needed.
+    ```
+  </Accordion>
+  
+  <Accordion title="Use model overrides strategically">
+    Different tasks benefit from different models:
+    
+    - **Code review**: GPT-4 (strong reasoning)
+    - **Content writing**: Claude (natural language)
+    - **Data analysis**: GPT-4 with code interpreter
+  </Accordion>
+  
+  <Accordion title="Restrict tool groups">
+    Limit tools to what the agent needs:
+    
+    ```json
+    {
+      "name": "security-auditor",
+      "tool_groups": ["sandbox"],
+      "soul": "Only read files, never modify code..."
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Set up USER.md once">
+    Create a comprehensive USER.md that all agents can reference:
+    
+    ```markdown
+    # About Me
+    
+    Software engineer at TechCorp
+    - Team: Platform Engineering
+    - Stack: Python, Go, Kubernetes
+    - Preferences: TDD, clean code, documentation
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Error Codes
+
+<ResponseField name="404" type="error">
+  Agent not found
+</ResponseField>
+
+<ResponseField name="409" type="error">
+  Agent already exists (when creating)
+</ResponseField>
+
+<ResponseField name="422" type="error">
+  Invalid agent name (must match `^[A-Za-z0-9-]+$`)
+</ResponseField>
+
+<ResponseField name="500" type="error">
+  Internal server error
+</ResponseField>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Gateway API Overview" icon="server" href="/api/gateway/overview">
+    Learn about other Gateway endpoints
+  </Card>
+  <Card title="Skills API" icon="puzzle-piece" href="/api/gateway/skills">
+    Manage skills for your agents
+  </Card>
+  <Card title="Models Configuration" icon="brain" href="/configuration/models">
+    Configure LLM models
+  </Card>
+  <Card title="Agent System" icon="robot" href="/concepts/agent-system">
+    Understanding the agent architecture
+  </Card>
+</CardGroup>

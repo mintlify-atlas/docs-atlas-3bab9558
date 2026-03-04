@@ -164,6 +164,8 @@
     "DeerFlowClient.upload_files() - Upload files to thread",
     "DeerFlowClient.get_memory() - Access long-term memory",
     "Gateway API: /api/models - Model management endpoints",
+    "Gateway API: /api/agents - Custom agents with SOUL.md profiles",
+    "Gateway API: /api/user-profile - Global user profile (USER.md)",
     "Gateway API: /api/skills - Skills management endpoints",
     "Gateway API: /api/mcp - MCP server configuration",
     "Gateway API: /api/memory - Memory management",
